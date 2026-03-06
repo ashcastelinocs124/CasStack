@@ -6,86 +6,196 @@ description: Safely push code to GitHub while preventing sensitive files. Use wh
 # gitpush
 
 ## Purpose
-Push code to GitHub following basic industry practices, with explicit repo/branch confirmation and strict sensitive-file exclusions.
+Push code to GitHub following developer best practices — git identity pre-check, .gitignore enforcement, secret scanning, and explicit confirmation before every push.
 
 ## Required Safety Rules
-- Never push `.env`, `.claude/**`, credentials, or secrets (e.g., keys, tokens, config with secrets).
-- Always review `git status` and `git diff` before pushing.
-- **Always ask the user which repo and branch to push to — never assume.**
+- Never push `.env`, `.claude/**`, credentials, or secrets.
+- **A `.gitignore` must exist before staging.** If it's missing, create one.
+- **`.env` and all variants must be in `.gitignore`.** Check before staging.
 - Always show a final confirmation summary and get explicit approval before committing or pushing.
 - Never force-push unless explicitly requested.
-- If this is the first push (no remote history), ensure a `README.md` exists before pushing.
-- **Always verify commits are attributed to the correct account.** Run `git config user.name` and `git config user.email` and confirm both match:
-  - `user.name` = `ashcastelinocs124`
-  - `user.email` = `ashleyn4@illinois.edu`
-  - If either is wrong, run `git config user.name "ashcastelinocs124"` and `git config user.email "ashleyn4@illinois.edu"` to fix before committing.
+
+---
 
 ## Workflow
 
-### Step 1 — Gather info
-Run `git status`, `git diff`, `git remote -v`, and `git branch` to understand current state.
+### Step 1 — Gather info + Identity check
 
-Also run `git config user.name` and `git config user.email`. If they don't match `ashcastelinocs124` / `ashleyn4@illinois.edu`, fix them now:
+Run in parallel:
 ```bash
-git config user.name "ashcastelinocs124"
-git config user.email "ashleyn4@illinois.edu"
+git status
+git diff
+git remote -v
+git branch -a
+git config user.name
+git config user.email
 ```
 
-### Step 2 — Ask the 3 confirmation questions (BLOCKING — do not skip)
-Present these questions to the user and wait for answers before proceeding:
+**Identity logic (do NOT ask if already set):**
 
-1. **Repo:** "Which GitHub repo should I push to? (detected remotes: `<list remotes>`)"
-2. **Branch:** "Which branch should I push to? (current: `<branch>`) — main/master or another branch?"
-3. If pushing to main/master, explicitly flag: "This will push directly to the default branch — confirm?"
+- If `git config user.name` and `git config user.email` are both non-empty → use them as-is, no question needed
+- If either is empty → use AskUserQuestion:
 
-### Step 3 — Scan for sensitive files
-- `.env`, `.env.*`
+```
+question: "Git identity isn't set. What name and email should commits use?"
+header: "Git identity"
+options:
+  - label: "ashcastelinocs124 / ashleyn4@illinois.edu"
+    description: "Use the default account"
+  - label: "Enter manually"
+    description: "I'll type my name and email"
+```
+
+Then run:
+```bash
+git config user.name "<confirmed-name>"
+git config user.email "<confirmed-email>"
+```
+
+---
+
+### Step 1.5 — Repo selection (only if no remote set) (BLOCKING — use AskUserQuestion)
+
+**Skip this step if `git remote -v` returned a remote.**
+
+If no remote:
+```bash
+gh repo list --limit 5 --json name,url,updatedAt --sort updated
+```
+
+```
+question: "No remote is set. Which GitHub repo should this push to?"
+header: "Target repo"
+options:
+  - label: "<repo-name-1>"
+    description: "Last updated: <updatedAt>"
+  - label: "<repo-name-2>"
+    description: "Last updated: <updatedAt>"
+  - label: "Paste a link"
+    description: "I'll provide the full repo URL"
+```
+
+Then: `git remote add origin <url>`
+
+If `gh` fails or isn't authenticated → go straight to "Paste a link".
+
+---
+
+### Step 2 — Branch selection (BLOCKING — use AskUserQuestion)
+
+```
+question: "Which branch do you want to push to?"
+header: "Target branch"
+options:
+  - label: "<current branch>"
+    description: "Push to current branch (currently checked out)"
+  - label: "main"
+    description: "Push to main — this is the default branch"
+  - label: "New branch"
+    description: "Create and push to a new branch"
+```
+
+If "New branch": ask for the name, then `git checkout -b <name>`.
+
+---
+
+### Step 3 — Best-practices audit (BLOCKING — fix before staging)
+
+Run all checks. Do not proceed until each passes:
+
+**3a. `.gitignore` must exist**
+```bash
+test -f .gitignore || echo "MISSING"
+```
+If missing → create one with at minimum:
+```
+.env
+.env.*
+.env.local
+.claude/
+node_modules/
+*.pem
+*.key
+```
+
+**3b. Dotenv variants must be covered**
+
+Check `.gitignore` covers all of:
+- `.env`
+- `.env.*`
+- `.env.local`
+
+If any are missing, add them to `.gitignore` before staging.
+
+**3c. Scan staged + modified files for secrets**
+
+Flag and stop if any of these are staged or modified:
+- `.env`, `.env.*`, `.env.local`
 - `.claude/**`
 - `credentials.json`, `secrets.*`, `*.pem`, `*.key`
-- Any file containing obvious secrets
+- Files containing obvious secrets (API keys, tokens, private keys)
 
-If sensitive files are staged or modified, **stop and ask** the user what to do.
+If flagged → stop and ask the user what to do. Do not proceed until resolved.
 
-### Step 4 — Show final confirmation summary + AskUserQuestion gate (BLOCKING — do not skip)
+---
 
-Display the summary to the user:
+### Step 4 — README check (BLOCKING — use AskUserQuestion)
 
+```
+question: "Does the README need to be updated before pushing?"
+header: "README"
+options:
+  - label: "No, it's fine"
+    description: "Proceed without changes"
+  - label: "Yes, update it"
+    description: "Tell me what changed and I'll update it"
+  - label: "No README exists — create one"   ← only if README is missing
+    description: "Generate a basic README from repo contents"
+```
+
+---
+
+### Step 5 — Final confirmation (BLOCKING — use AskUserQuestion)
+
+Display:
 ```
 Ready to push:
   Repo:    <remote URL>
-  Branch:  <branch name>
-  Files:   <list of staged files>
-  Commit:  "<proposed commit message>"
-  Author:  ashcastelinocs124 <ashleyn4@illinois.edu>  ✓
+  Branch:  <branch>
+  Files:   <staged files>
+  Commit:  "<message>"
+  Author:  <user.name> <<user.email>>  ✓
+  .gitignore: ✓   Secrets scan: ✓
 ```
 
-Then **immediately use the `AskUserQuestion` tool** with this exact question:
-
 ```
-question: "Are you sure you want to push to <branch> on <repo>?"
+question: "Push to <branch> on <repo>?"
 header: "Confirm push"
 options:
   - label: "Yes, push it"
-    description: "Proceed with git push"
+    description: "Commit and push"
   - label: "No, cancel"
-    description: "Abort — do not push anything"
+    description: "Abort — nothing will be pushed"
 ```
 
-**Do NOT run any git commit or git push command until the user selects "Yes, push it".
-If they select "No, cancel" or "Other", abort immediately and tell the user nothing was pushed.**
+**Do not run git commit or git push until "Yes, push it" is selected.**
 
-### Step 5 — Execute
-1. If first push, verify `README.md` exists; create one only if the user asks.
-2. Ensure branch is up to date (pull/rebase if needed) unless user says otherwise.
-3. Commit and push to the confirmed repo and branch.
+---
 
-## Example Prompt
+### Step 6 — Execute
+1. `git add <files>` (never `git add .` — be specific)
+2. `git commit -m "<message>"`
+3. `git push origin <branch>`
+
+---
+
+## Example Flow
 User: "push my changes"
-Assistant:
-1. Run status/diff/remote/branch checks.
-2. Ask: "Which repo should I push to? Detected: origin → https://github.com/user/repo"
-3. Ask: "Which branch? Currently on `feature/auth`. Push here or to main?"
-4. Scan for sensitive files.
-5. Show full confirmation summary and wait for explicit yes.
-6. Commit and push only after confirmation.
-
+1. Run info checks — identity already set → skip hook
+2. Remote exists → skip repo selection
+3. AskUserQuestion → branch
+4. Audit .gitignore → add missing `.env.*` if needed
+5. Scan for secrets → clean
+6. AskUserQuestion → README
+7. Show summary → AskUserQuestion → confirm
+8. Commit and push
