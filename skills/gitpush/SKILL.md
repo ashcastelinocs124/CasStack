@@ -15,28 +15,106 @@ Push code to GitHub following basic industry practices, with explicit repo/branc
 - Always show a final confirmation summary and get explicit approval before committing or pushing.
 - Never force-push unless explicitly requested.
 - If this is the first push (no remote history), ensure a `README.md` exists before pushing.
-- **Always verify commits are attributed to the correct account.** Run `git config user.name` and `git config user.email` and confirm both match:
-  - `user.name` = `ashcastelinocs124`
-  - `user.email` = `ashleyn4@illinois.edu`
-  - If either is wrong, run `git config user.name "ashcastelinocs124"` and `git config user.email "ashleyn4@illinois.edu"` to fix before committing.
+- **Always verify commits are attributed to the correct account.** Run `git config user.name` and `git config user.email` and confirm both match the user's GitHub identity. If either is wrong, ask the user what name and email to use, then fix:
+  ```bash
+  git config user.name "<their-github-username>"
+  git config user.email "<their-email>"
+  ```
 
 ## Workflow
 
-### Step 1 — Gather info
+### Step 1 — Gather info + Identity check (BLOCKING — use AskUserQuestion)
+
 Run `git status`, `git diff`, `git remote -v`, and `git branch` to understand current state.
 
-Also run `git config user.name` and `git config user.email`. If they don't match `ashcastelinocs124` / `ashleyn4@illinois.edu`, fix them now:
-```bash
-git config user.name "ashcastelinocs124"
-git config user.email "ashleyn4@illinois.edu"
+Also run `git config user.name` and `git config user.email`. Then immediately use `AskUserQuestion`:
+
+```
+question: "Git identity is set to: <user.name> <<user.email>>. Is this the correct GitHub account to commit as?"
+header: "Git identity"
+options:
+  - label: "Yes, that's correct"
+    description: "Proceed with this identity"
+  - label: "No, change it"
+    description: "I'll provide the correct name and email"
 ```
 
-### Step 2 — Ask the 3 confirmation questions (BLOCKING — do not skip)
-Present these questions to the user and wait for answers before proceeding:
+- If user selects "No, change it": ask for the correct name and email, then run:
+  ```bash
+  git config user.name "<their-name>"
+  git config user.email "<their-email>"
+  ```
 
-1. **Repo:** "Which GitHub repo should I push to? (detected remotes: `<list remotes>`)"
-2. **Branch:** "Which branch should I push to? (current: `<branch>`) — main/master or another branch?"
-3. If pushing to main/master, explicitly flag: "This will push directly to the default branch — confirm?"
+---
+
+### Step 1.5 — Repo selection when no remote is set (BLOCKING — use AskUserQuestion)
+
+**Trigger:** `git remote -v` returns empty output OR the user did not provide a repo URL.
+
+Run:
+```bash
+gh repo list <detected-github-username> --limit 5 --json name,url,updatedAt --sort updated
+```
+
+This returns the 5 most recently updated repos. Build an `AskUserQuestion` from the results:
+
+```
+question: "No remote is set. Which GitHub repo should this be pushed to?"
+header: "Target repo"
+options:
+  - label: "<repo-name-1>"
+    description: "Last updated: <updatedAt> — github.com/<user>/<repo-name-1>"
+  - label: "<repo-name-2>"
+    description: "Last updated: <updatedAt> — ..."
+  - label: "Paste a link"
+    description: "I'll provide the full repo URL myself"
+```
+
+- If user selects a repo from the list: set remote with `git remote add origin <url>` then continue.
+- If user selects "Paste a link" or types "Other": ask for the full URL, then `git remote add origin <url>`.
+- If `gh` is not authenticated or fails: skip to the "Paste a link" fallback directly.
+
+**Do not assume or guess a repo. Always ask.**
+
+---
+
+### Step 2 — Branch selection (BLOCKING — use AskUserQuestion)
+
+Use the `AskUserQuestion` tool to ask which branch to push to. Build the options dynamically from `git branch -a` output:
+
+```
+question: "Which branch do you want to push to?"
+header: "Target branch"
+options:
+  - label: "<current branch>"         ← always first
+    description: "Push to current branch (currently checked out)"
+  - label: "main"                     ← if exists and different from current
+    description: "Push to main branch"
+  - label: "New branch"
+    description: "Create and push to a new branch — I'll ask for the name"
+```
+
+- If user selects "New branch", ask for the name with a follow-up `AskUserQuestion` or text prompt.
+- If pushing to main/master, note: "This pushes directly to the default branch."
+
+### Step 2.5 — README check (BLOCKING — use AskUserQuestion)
+
+Check if a `README.md` exists in the repo root. Then use `AskUserQuestion`:
+
+```
+question: "Does the README need to be updated before pushing?"
+header: "README update"
+options:
+  - label: "No, README is fine"
+    description: "Proceed without touching the README"
+  - label: "Yes, update it"
+    description: "I'll describe what changed and you update the README before pushing"
+  - label: "No README exists — create one"    ← only show if README is missing
+    description: "Generate a basic README before pushing"
+```
+
+- If user selects "Yes, update it": ask them what to add/change, make the edits, then continue.
+- If user selects "create one": generate a minimal README based on the repo contents, show it for approval, then continue.
 
 ### Step 3 — Scan for sensitive files
 - `.env`, `.env.*`
@@ -45,6 +123,10 @@ Present these questions to the user and wait for answers before proceeding:
 - Any file containing obvious secrets
 
 If sensitive files are staged or modified, **stop and ask** the user what to do.
+
+**Also audit `.gitignore` coverage before staging:**
+- `.env` in `.gitignore` does NOT match `.env.local` or `.env.*` — check that all dotenv variants are covered
+- If `.gitignore` is missing `.env.*` or `.env.local`, offer to add them before proceeding with `git add`
 
 ### Step 4 — Show final confirmation summary + AskUserQuestion gate (BLOCKING — do not skip)
 
@@ -56,7 +138,7 @@ Ready to push:
   Branch:  <branch name>
   Files:   <list of staged files>
   Commit:  "<proposed commit message>"
-  Author:  ashcastelinocs124 <ashleyn4@illinois.edu>  ✓
+  Author:  <git config user.name> <<git config user.email>>  ✓
 ```
 
 Then **immediately use the `AskUserQuestion` tool** with this exact question:
@@ -82,10 +164,11 @@ If they select "No, cancel" or "Other", abort immediately and tell the user noth
 ## Example Prompt
 User: "push my changes"
 Assistant:
-1. Run status/diff/remote/branch checks.
-2. Ask: "Which repo should I push to? Detected: origin → https://github.com/user/repo"
-3. Ask: "Which branch? Currently on `feature/auth`. Push here or to main?"
-4. Scan for sensitive files.
-5. Show full confirmation summary and wait for explicit yes.
-6. Commit and push only after confirmation.
-
+1. Run status/diff/remote/branch checks + confirm git identity with user.
+2. **If no remote set:** run `gh repo list` → AskUserQuestion with last 5 repos + "Paste a link" option → set remote.
+3. AskUserQuestion → "Which branch?" (options: current branch / main / new branch)
+4. AskUserQuestion → "Does the README need updating?" (yes / no / create)
+5. Scan for sensitive files — stop if any found.
+6. Show confirmation summary (repo, branch, files, commit message, author).
+7. AskUserQuestion → "Are you sure you want to push?" (Yes, push it / No, cancel)
+8. Commit and push only after explicit "Yes, push it".
