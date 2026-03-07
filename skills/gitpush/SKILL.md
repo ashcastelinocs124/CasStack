@@ -26,6 +26,7 @@ Push code to GitHub following developer best practices — git identity pre-chec
 - **`.env` and all variants must be in `.gitignore`.** Check before staging.
 - Always show a final confirmation summary and get explicit approval before committing or pushing.
 - Never force-push unless explicitly requested.
+- **"Chat about this" = full stop.** Every hook includes a "Chat about this" option. If selected, stop the workflow completely, read what the user says, and respond to them. Do NOT continue pushing. Resume only when they explicitly say to.
 
 ---
 
@@ -56,6 +57,8 @@ options:
     description: "Use the configured account (set via setup.sh)"
   - label: "Enter manually"
     description: "I'll type my name and email"
+  - label: "Chat about this"
+    description: "Stop — I want to talk about this first"
 ```
 
 Then run:
@@ -85,6 +88,8 @@ options:
     description: "Last updated: <updatedAt>"
   - label: "Paste a link"
     description: "I'll provide the full repo URL"
+  - label: "Chat about this"
+    description: "Stop — I want to talk about this first"
 ```
 
 Then: `git remote add origin <url>`
@@ -105,6 +110,8 @@ options:
     description: "Push to main — this is the default branch"
   - label: "New branch"
     description: "Create and push to a new branch"
+  - label: "Chat about this"
+    description: "Stop — I want to talk about this first"
 ```
 
 If "New branch": ask for the name, then `git checkout -b <name>`.
@@ -163,6 +170,8 @@ options:
     description: "Tell me what changed and I'll update it"
   - label: "No README exists — create one"   ← only if README is missing
     description: "Generate a basic README from repo contents"
+  - label: "Chat about this"
+    description: "Stop — I want to talk about this first"
 ```
 
 ---
@@ -188,9 +197,12 @@ options:
     description: "Commit and push"
   - label: "No, cancel"
     description: "Abort — nothing will be pushed"
+  - label: "Chat about this"
+    description: "Stop — I want to talk about this first"
 ```
 
 **Do not run git commit or git push until "Yes, push it" is selected.**
+**If "Chat about this" is selected at any hook: stop immediately, read what the user says, and respond. Do not resume the push workflow until they explicitly say to.**
 
 ---
 
