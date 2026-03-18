@@ -4,15 +4,15 @@
 
 ## Example 1 — Pushing skill files to a separate empty repo
 
-**Scenario:** User asks to push specific files from the current project into a different GitHub repo (`ashcastelinocs124/public-skills`) that has never been pushed to before.
+**Scenario:** User asks to push specific files from the current project into a different GitHub repo (`your-username/public-skills`) that has never been pushed to before.
 
 ### Step 1 — Gather info
 
 ```bash
-gh repo view ashcastelinocs124/public-skills
+gh repo view your-username/public-skills
 # → repo exists
 
-gh api repos/ashcastelinocs124/public-skills/git/refs
+gh api repos/your-username/public-skills/git/refs
 # → {"message":"Git Repository is empty.","status":"409"}
 # → Repo exists but has no commits — needs initialization
 ```
@@ -20,7 +20,7 @@ gh api repos/ashcastelinocs124/public-skills/git/refs
 **Decision:** Target is a different repo from the working directory. Clone it to `/tmp`, copy files in, push from there.
 
 ```bash
-cd /tmp && git clone https://github.com/ashcastelinocs124/public-skills.git
+cd /tmp && git clone https://github.com/your-username/public-skills.git
 # → "warning: You appear to have cloned an empty repository." — expected
 ```
 
@@ -55,14 +55,14 @@ The word "task-based" partially matched `TOKEN`. **Verified by reading context**
 
 ```bash
 cd /tmp/public-skills
-git config user.name "ashcastelinocs124"
-git config user.email "ashleyn4@illinois.edu"
+git config user.name "your-username"
+git config user.email "your-email@example.com"
 ```
 
 Confirmation summary shown:
 ```
 Ready to push:
-  Repo:    https://github.com/ashcastelinocs124/public-skills
+  Repo:    https://github.com/your-username/public-skills
   Branch:  main (first push — initializing repo)
   Files:   README.md
            agents/code-implementation.md
@@ -73,7 +73,7 @@ Ready to push:
            skills/gitpush/SKILL.md
            skills/skill-creator/SKILL.md + scripts/
   Commit:  "feat: add code-implementation, gitpush, capture-learnings, skill-creator skills + agents"
-  Author:  ashcastelinocs124 <ashleyn4@illinois.edu>  ✓
+  Author:  your-username <your-email@example.com>  ✓
 ```
 
 AskUserQuestion → User selected **"Yes, push it"**.

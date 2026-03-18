@@ -21,10 +21,7 @@ Push code to GitHub following basic industry practices, with explicit repo/branc
 - Never force-push unless explicitly requested.
 - If this is the first push (no remote history), ensure a `README.md` exists before pushing.
 - **"Chat about this" = full stop.** Every hook includes a "Chat about this" option. If selected, stop the workflow completely, read what the user says, and respond. Do NOT continue pushing. Resume only when they explicitly say to.
-- **Always verify commits are attributed to the correct account.** Run `git config user.name` and `git config user.email` and confirm both match:
-  - `user.name` = `ashcastelinocs124`
-  - `user.email` = `ashleyn4@illinois.edu`
-  - If either is wrong, run `git config user.name "ashcastelinocs124"` and `git config user.email "ashleyn4@illinois.edu"` to fix before committing.
+- **Always verify commits are attributed to the correct account.** Run `git config user.name` and `git config user.email` and confirm both match the values in the **Stored GitHub Identity** section below. If either is wrong, fix them with `git config user.name` and `git config user.email` before committing.
 
 ## Stored GitHub Identity
 - **Username:** `<your-username>`
@@ -52,7 +49,7 @@ options:
     description: "Stop — I want to talk about this first"
 ```
 - If "Yes": proceed with current remote.
-- If "No": run `gh repo list ashcastelinocs124 --limit 5 --json name,url,updatedAt --sort updated`, show results as options + "Paste a link", set new remote with `git remote set-url origin <url>`.
+- If "No": run `gh repo list --limit 5 --json name,url,updatedAt --sort updated`, show results as options + "Paste a link", set new remote with `git remote set-url origin <url>`.
 - If "Chat about this": stop completely and listen.
 
 **If no remote is set:** skip to Step 1.5 (repo selection).
@@ -60,10 +57,10 @@ options:
 ### Step 1 — Gather info
 Run `git status`, `git diff`, `git remote -v`, and `git branch` to understand current state.
 
-Also run `git config user.name` and `git config user.email`. If they don't match `ashcastelinocs124` / `ashleyn4@illinois.edu`, fix them now:
+Also run `git config user.name` and `git config user.email`. If they don't match the **Stored GitHub Identity** values, fix them now:
 ```bash
-git config user.name "ashcastelinocs124"
-git config user.email "ashleyn4@illinois.edu"
+git config user.name "<your-username>"
+git config user.email "<your-email>"
 ```
 
 ### Step 1.5 — Repo selection when no remote is set (BLOCKING — use AskUserQuestion)
@@ -72,7 +69,7 @@ git config user.email "ashleyn4@illinois.edu"
 
 Run:
 ```bash
-gh repo list ashcastelinocs124 --limit 5 --json name,url,updatedAt --sort updated
+gh repo list --limit 5 --json name,url,updatedAt --sort updated
 ```
 
 This returns the 5 most recently updated repos. Build an `AskUserQuestion` from the results:
@@ -82,9 +79,9 @@ question: "No remote is set. Which GitHub repo should this be pushed to?"
 header: "Target repo"
 options:
   - label: "<repo-name-1>"
-    description: "Last updated: <updatedAt> — github.com/ashcastelinocs124/<repo-name-1>"
+    description: "Last updated: <updatedAt> — <repo-url-1>"
   - label: "<repo-name-2>"
-    description: "Last updated: <updatedAt> — github.com/ashcastelinocs124/<repo-name-2>"
+    description: "Last updated: <updatedAt> — <repo-url-2>"
   - label: "<repo-name-3>"
     description: "Last updated: <updatedAt> — ..."
   - label: "Paste a link"
@@ -143,7 +140,7 @@ options:
 ```
 
 **If "Yes — record and embed":**
-1. Invoke the `screen-record` skill (see `ashcastelinocs124/public-skill`) to capture the app flow
+1. Invoke the `screen-record` skill to capture the app flow
 2. After recording completes, render a GIF: look for a `render:gif` script in package.json or equivalent
 3. Commit the GIF to the repo (e.g. `docs/demo.gif` or `video/out/demo.gif`)
 4. Add to README at a visible position (below the description, before install steps):
@@ -300,7 +297,7 @@ Ready to push:
   Branch:  <branch name>
   Files:   <list of staged files>
   Commit:  "<proposed commit message>"
-  Author:  ashcastelinocs124 <ashleyn4@illinois.edu>  ✓
+  Author:  <your-username> <<your-email>>  ✓
 ```
 
 Then **immediately use the `AskUserQuestion` tool** with this exact question:
