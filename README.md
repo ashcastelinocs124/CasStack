@@ -6,7 +6,7 @@ A curated collection of **agents** and **skills** for AI coding assistants. Plug
 
 ## Table of Contents
 
-- [Why Agentarium?](#why-agentarium)
+- [Why CasStack?](#why-casStack)
 - [What's Inside](#whats-inside)
   - [Agents](#agents)
   - [Skills](#skills)
