@@ -39,7 +39,7 @@ A curated collection of **agents** and **skills** for AI coding assistants. Plug
 
 ---
 
-## Why Agentarium?
+## Why CasStack?
 
 AI coding assistants are powerful out of the box, but they lack **procedural memory** -- the step-by-step knowledge of *how* to do specialized tasks reliably. Agentarium fills that gap with:
 
