@@ -1,432 +1,218 @@
 ---
 name: gitpush
-description: Safely push code to GitHub while preventing sensitive files. Use when the user asks to push, publish, or sync code to GitHub, or mentions git push/branching.
+description: This skill should be used when the user asks to "gitpush", "push my code", "push to the repo", "push this branch", "push changes upstream", or otherwise wants to push local commits to a remote. It runs prehook questions (configure the remote if missing, choose the branch, decide on a security review) and guarantees the chosen branch is in sync with origin's default branch before pushing.
+version: 0.1.0
 ---
 
 # gitpush
 
-## Purpose
-Push code to GitHub following basic industry practices, with explicit repo/branch confirmation and strict sensitive-file exclusions.
-
-## Required Safety Rules
-- Never push `.env`, `.claude/**`, credentials, or secrets (e.g., keys, tokens, config with secrets).
-- Never push `.gitignore` — unstage it silently if it's staged.
-- Never push `memory.md` — unstage it silently if it's staged.
-- Never push `CLAUDE.md` — unstage it silently if it's staged.
-- Never push `learnings.md` — unstage it silently if it's staged.
-- Never push plans or specs files (e.g., `PLAN.md`, `SPEC.md`, `*-plan.md`, `*-spec.md`, `plans/`, `specs/`) — unstage them silently if staged. These are internal working documents for the user, not for the repo.
-- Always review `git status` and `git diff` before pushing.
-- **Always ask the user which repo and branch to push to — never assume.**
-- Always show a final confirmation summary and get explicit approval before committing or pushing.
-- Never force-push unless explicitly requested.
-- If this is the first push (no remote history), ensure a `README.md` exists before pushing.
-- **"Chat about this" = full stop.** Every hook includes a "Chat about this" option. If selected, stop the workflow completely, read what the user says, and respond. Do NOT continue pushing. Resume only when they explicitly say to.
-- **Always verify commits are attributed to the correct account.** Run `git config user.name` and `git config user.email` and confirm both match the values in the **Stored GitHub Identity** section below. If either is wrong, fix them with `git config user.name` and `git config user.email` before committing.
-
-## Stored GitHub Identity
-- **Username:** `<your-username>`
-- **Email:** `<your-email>`
-- Always verify and fix git config to match before committing (see Step 1).
-
----
+Push local commits to a remote safely. Before any `git push` runs, gather the
+repo's real state, ask the user the required prehook questions, and make sure
+the branch being pushed is in sync with origin's default branch (main/master)
+so the push is a clean fast-forward and never clobbers remote history.
 
 ## Workflow
 
-### Step 0 — Confirm target repo (BLOCKING — use AskUserQuestion)
+Run these steps in order. Do not push until every gate passes.
 
-Run `git remote -v` first. Then ask:
+### Step 1 — Preflight (gather state)
 
-**If a remote is already set:**
-```
-question: "Push to <current remote URL>?"
-header: "Target repo"
-options:
-  - label: "Yes — push here"
-    description: "<current remote URL>"
-  - label: "No — different repo"
-    description: "I'll pick a different repo"
-  - label: "Chat about this"
-    description: "Stop — I want to talk about this first"
-```
-- If "Yes": proceed with current remote.
-- If "No": run `gh repo list --limit 5 --json name,url,updatedAt --sort updated`, show results as options + "Paste a link", set new remote with `git remote set-url origin <url>`.
-- If "Chat about this": stop completely and listen.
+Run the preflight script and parse its `KEY=VALUE` output:
 
-**If no remote is set:** skip to Step 1.5 (repo selection).
-
-### Step 1 — Gather info
-Run `git status`, `git diff`, `git remote -v`, and `git branch` to understand current state.
-
-Also run `git config user.name` and `git config user.email`. If they don't match the **Stored GitHub Identity** values, fix them now:
 ```bash
-git config user.name "<your-username>"
-git config user.email "<your-email>"
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills/gitpush}/scripts/preflight.sh"
 ```
 
-### Step 1.5 — Repo selection when no remote is set (BLOCKING — use AskUserQuestion)
+It reports: `IS_GIT_REPO`, `CURRENT_BRANCH`, `LOCAL_BRANCHES`, `HAS_ORIGIN`,
+`ORIGIN_URL`, `WORKTREE_DIRTY`, `UNCOMMITTED_COUNT`, `FETCH_OK`,
+`DEFAULT_BRANCH`, `UPSTREAM`, `BEHIND_UPSTREAM`/`AHEAD_UPSTREAM`, and
+`BEHIND_DEFAULT`/`AHEAD_DEFAULT`. The script never mutates the repo (it does a
+read-only `git fetch`). Base all decisions below on these values, not guesses.
 
-**Trigger:** `git remote -v` returns empty output OR the user did not provide a repo URL.
+If `IS_GIT_REPO=false`, stop and ask whether to `git init` here before
+continuing — there is nothing to push otherwise.
 
-Run:
+### Step 2 — Prehook questions
+
+Ask the prehook questions with the **AskUserQuestion** tool. Skip any question
+whose answer is already unambiguous from preflight, and surface them together
+where possible rather than one message at a time.
+
+1. **Remote (only if `HAS_ORIGIN=false`).** No `origin` is configured, so ask
+   for the repository to push to. Offer to create/connect it:
+   - If the GitHub CLI is available (`gh auth status` succeeds), offer
+     `gh repo create <name> --source=. --remote=origin` (ask public vs private).
+   - Otherwise ask for the remote URL and run
+     `git remote add origin <url>`.
+   Confirm the URL before adding it. If `HAS_ORIGIN=true`, skip this question.
+
+2. **Branch to push.** Ask which branch to push, defaulting to
+   `CURRENT_BRANCH`. Offer the entries from `LOCAL_BRANCHES` as options. If the
+   user picks a branch other than the current one, `git switch <branch>` first
+   and re-run preflight so the sync numbers reflect that branch.
+
+3. **Security review.** Ask whether a security review is needed before pushing.
+   Recommend "yes" when the diff touches auth, secrets, crypto, input handling,
+   network calls, or dependencies. If yes, run the **security-review** skill (or
+   the `/security-review` command) and report findings **before** pushing. If it
+   surfaces serious issues, stop and let the user decide whether to proceed.
+
+### Step 3 — Sync with origin's default branch
+
+Guarantee the branch being pushed is in sync with origin before pushing.
+
+- If `FETCH_OK=false`, the remote was unreachable — resolve connectivity (or
+  re-add the remote) before continuing.
+- If `WORKTREE_DIRTY=true`, there are uncommitted changes. Ask whether to
+  commit them (and with what message) or stash them; do not push around them
+  silently.
+- Inspect `BEHIND_DEFAULT` (commits on `origin/<DEFAULT_BRANCH>` not in the
+  branch):
+  - `0` → in sync, proceed.
+  - `>0` → the branch is behind origin's default branch. Integrate first:
+    `git rebase origin/<DEFAULT_BRANCH>` (preferred for a clean history) or
+    `git merge origin/<DEFAULT_BRANCH>` if the user prefers. Resolve any
+    conflicts, then re-run preflight to confirm `BEHIND_DEFAULT=0`.
+  - `unknown` → the default branch could not be determined; confirm the target
+    branch with the user before proceeding.
+- Also check `BEHIND_UPSTREAM` for the branch's own upstream when one exists
+  (`UPSTREAM` non-empty): if `>0`, the remote branch has commits the local one
+  lacks — integrate them so the push stays a fast-forward.
+
+Never use `--force` to work around a non-fast-forward. Only consider
+`--force-with-lease` after an intentional rebase, and confirm with the user
+first.
+
+### Step 4 — Verify authorship (HARD GATE)
+
+**THIS IS A HARD GATE. The push MUST NOT proceed until every commit to be
+pushed passes this check. No exceptions.**
+
+Before pushing, verify every commit that will reach the remote:
+
 ```bash
-gh repo list --limit 5 --json name,url,updatedAt --sort updated
+# List commits about to be pushed (local ahead of upstream)
+git log origin/<branch>..HEAD --format='%h %an <%ae> | %cn <%ce>'
 ```
 
-This returns the 5 most recently updated repos. Build an `AskUserQuestion` from the results:
+For every commit in the output:
 
-```
-question: "No remote is set. Which GitHub repo should this be pushed to?"
-header: "Target repo"
-options:
-  - label: "<repo-name-1>"
-    description: "Last updated: <updatedAt> — <repo-url-1>"
-  - label: "<repo-name-2>"
-    description: "Last updated: <updatedAt> — <repo-url-2>"
-  - label: "<repo-name-3>"
-    description: "Last updated: <updatedAt> — ..."
-  - label: "Paste a link"
-    description: "I'll provide the full repo URL myself"
-  - label: "Chat about this"
-    description: "Stop — I want to talk about this first"
-```
+1. **Author** (`%an <%ae>`) must be exactly:
+   **`ashcastelinocs124 <ashleyn4@illinois.edu>`**
+2. **Committer** (`%cn <%ce>`) must be exactly:
+   **`ashcastelinocs124 <ashleyn4@illinois.edu>`**
+3. **No co-authors.** Run `git log origin/<branch>..HEAD --format='%(trailers)'`
+   and confirm there are zero `Co-authored-by:` trailers. Also check commit
+   bodies for any "Generated with", "Co-authored-by:", or agent attribution
+   lines.
 
-- If user selects a repo from the list: set remote with `git remote add origin <url>` then continue.
-- If user selects "Paste a link" or types "Other": ask them to provide the full URL, then `git remote add origin <url>`.
-- If user selects "Chat about this": stop completely and listen.
-- If `gh` is not authenticated or fails: skip to the "Paste a link" fallback directly.
-
-**Do not assume or guess a repo. Always ask.**
-
----
-
-### Step 2 — Branch selection (BLOCKING — use AskUserQuestion)
-
-Use the `AskUserQuestion` tool to ask which branch to push to. Build the options dynamically from `git branch -a` output:
-
-```
-question: "Which branch do you want to push to?"
-header: "Target branch"
-options:
-  - label: "<current branch>"         ← always first
-    description: "Push to current branch (currently checked out)"
-  - label: "main"                     ← if exists and different from current
-    description: "Push to main branch"
-  - label: "New branch"
-    description: "Create and push to a new branch — I'll ask for the name"
-  - label: "Chat about this"
-    description: "Stop — I want to talk about this first"
-```
-
-- If user selects "New branch", ask for the name with a follow-up `AskUserQuestion` or text prompt.
-- If user selects "Chat about this": stop completely and listen.
-- If pushing to main/master, note: "This pushes directly to the default branch."
-
-### Step 2.5 — Screen recording for README (BLOCKING — use AskUserQuestion)
-
-Ask before touching the README:
-
-```
-question: "Do you want to record the app and embed a demo in the README?"
-header: "Demo recording"
-options:
-  - label: "Yes — record and embed"
-    description: "Invoke the screen-recording skill, render a GIF, and add it to the README"
-  - label: "I already have a video — add it"
-    description: "I'll paste a YouTube URL or GIF path to embed"
-  - label: "No — skip recording"
-    description: "Proceed without a demo video"
-  - label: "Chat about this"
-    description: "Stop — I want to talk about this first"
-```
-
-**If "Yes — record and embed":**
-1. Invoke the `screen-record` skill to capture the app flow
-2. After recording completes, render a GIF: look for a `render:gif` script in package.json or equivalent
-3. Commit the GIF to the repo (e.g. `docs/demo.gif` or `video/out/demo.gif`)
-4. Add to README at a visible position (below the description, before install steps):
-   ```markdown
-   ![Demo](docs/demo.gif)
-   ```
-5. Continue to README check step
-
-**If "I already have a video — add it":**
-- If YouTube URL: add a linked thumbnail to README:
-  ```markdown
-  [![Watch the demo](https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg)](https://youtu.be/VIDEO_ID)
+If ANY commit fails ANY of these checks:
+- **Stop immediately.** Do not push.
+- Fix the offending commits. For author/committer:
+  ```bash
+  GIT_COMMITTER_NAME="ashcastelinocs124" \
+  GIT_COMMITTER_EMAIL="ashleyn4@illinois.edu" \
+  git commit --amend --author="ashcastelinocs124 <ashleyn4@illinois.edu>" --no-edit
   ```
-- If local GIF path: copy to `docs/` and embed with `![Demo](docs/demo.gif)`
-- Continue to README check step
+  For multiple commits, use `git rebase` with `GIT_COMMITTER_*` env vars set.
+- For co-author/agent trailers: amend to strip those lines from the message body.
+- Re-run this check after fixing. Push only when every commit is clean.
 
-**If "No — skip recording":** continue immediately.
-**If "Chat about this":** stop completely and listen.
+Only proceed to Step 4b when this gate passes.
 
----
+### Step 4b — Exclude plans & internal docs (HARD GATE)
 
-### Step 2.6 — README check (BLOCKING — use AskUserQuestion)
+**Never push internal planning or design material to the repo.** These are
+working artifacts, not shippable code — they stay local. Surface and remove
+them BEFORE pushing.
 
-Check if a `README.md` exists in the repo root. Then use `AskUserQuestion`:
+Inspect every path in the commits about to go out:
 
-```
-question: "Does the README need to be updated before pushing?"
-header: "README update"
-options:
-  - label: "No, README is fine"
-    description: "Proceed without touching the README"
-  - label: "Yes, update it"
-    description: "I'll describe what changed and you update the README before pushing"
-  - label: "No README exists — create one"    ← only show if README is missing
-    description: "Generate an in-depth README before pushing"
-  - label: "Chat about this"
-    description: "Stop — I want to talk about this first"
+```bash
+git diff --name-only origin/<branch>..HEAD   # new branch: diff against the base, e.g. origin/<DEFAULT_BRANCH>..HEAD
 ```
 
-- If user selects "Yes, update it": ask them what to add/change, make the edits, then continue.
-- If user selects "create one": generate an **in-depth README** based on the repo contents — not a minimal stub. Include: project description, features/highlights, requirements, full setup/installation steps, usage guide with examples, architecture overview, configuration details, and license. Read enough source files to write something comprehensive. Show it for approval, then continue.
-- If user selects "Chat about this": stop completely and listen.
+Stop and drop from the commit any path that is a plan or internal doc:
 
-### Step 3 — Scan for sensitive files
-- `.env`, `.env.*`
-- `.claude/**`
-- `credentials.json`, `secrets.*`, `*.pem`, `*.key`
-- `.gitignore` — always exclude, unstage without asking
-- `memory.md` — always exclude, unstage without asking
-- `CLAUDE.md` — always exclude, unstage without asking
-- `learnings.md` — always exclude, unstage without asking
-- Plans and specs files (`PLAN.md`, `SPEC.md`, `*-plan.md`, `*-spec.md`, `plans/`, `specs/`, `PROGRESS.md`) — always exclude, unstage without asking
-- Any file containing obvious secrets
+- **Planning docs** — `docs/plans/**`, `docs/superpowers/plans/**`,
+  `docs/superpowers/specs/**`, and any `*-plan.md` / `*-spec.md`.
+- **Design briefs** — `docs/design/**` (e.g. frontend-design skill output).
+- **Strategy / premortem reports** — root-level `premortem-*.html`,
+  `*-report-*.html`, and their transcripts.
+- **Internal docs generally** — any markdown/notes not needed at runtime or by
+  consumers of the repo (session logs, scratch notes, agent briefs). When
+  unsure whether a doc is "internal," ask the user before including it.
 
-If sensitive files are staged or modified, **stop and ask** the user what to do. For `.gitignore`, `memory.md`, `CLAUDE.md`, `learnings.md`, and plan/spec files, unstage them silently with `git reset HEAD <file>` and note it in the confirmation summary.
+To drop a path from the commit: `git restore --staged <path>` (if only staged),
+or `git checkout <base> -- <path>` then re-amend, then re-run this gate. Push
+only code and the docs that genuinely ship with it (README, runtime config).
 
-**Also audit `.gitignore` coverage before staging:**
-- `.env` in `.gitignore` does NOT match `.env.local` or `.env.*` — check that all dotenv variants are covered
-- If `.gitignore` is missing `.env.*` or `.env.local`, offer to add them before proceeding with `git add`
+Only proceed to Step 4c when this gate passes.
 
-### Step 3.5 — Security scan (BLOCKING — do not skip)
+### Step 4c — Formatting & lint check (HARD GATE)
 
-Before showing the confirmation summary, **launch the security-scanner agent** to audit the entire codebase for security violations and sensitive data exposure.
+**Push only code that meets the project's own formatting and lint standards.**
+Unformatted code creates noisy diffs and reads as careless to anyone browsing the
+repo, so verify the working tree is clean *by the project's own tooling* before it
+goes out. Run everything in CHECK mode here — the gate verifies, it must not
+rewrite files mid-push.
 
-Dispatch a **general-purpose** Agent with this prompt:
+Detect what the project uses (look for config in `pyproject.toml`, `ruff.toml`,
+`.prettierrc*`, `package.json` scripts) and run the matching checks from the
+directory that owns each config:
 
-```
-Agent tool (general-purpose):
-  description: "Pre-push security scan"
-  prompt: |
-    You are the Security Scanner. Perform a fast pre-push security audit of the codebase at [project root].
-    This is a BLOCKING check — the push must NOT proceed if Critical findings exist.
-
-    ## Scan Checklist (execute ALL):
-
-    1. **Secrets in staged files** — scan `git diff --cached` for:
-       - API keys (sk-, ak_, ghp_, xoxb-, AKIA)
-       - Tokens (Discord bot tokens, JWT, bearer)
-       - Passwords/secrets in variable assignments
-       - Private keys (BEGIN RSA/OPENSSH PRIVATE KEY)
-       - Connection strings with embedded credentials
-       - .env file contents
-
-    2. **Secrets in full working tree** — grep the entire codebase for the patterns above
-
-    3. **.gitignore coverage** — verify .env*, *.pem, *.key, *.sqlite, credentials.json are covered
-
-    4. **Code security patterns** — check for:
-       - eval()/Function() with user input
-       - SQL injection (raw string concat in queries)
-       - Command injection (exec/spawn with unsanitized input)
-       - Missing permission checks on commands
-       - Prompt injection vulnerabilities in AI modules
-
-    5. **Config files** — verify YAML/JSON configs use ${ENV_VAR} syntax, no hardcoded secrets
-
-    ## Output Format:
-    CRITICAL: [list or "none"]
-    HIGH: [list or "none"]
-    MEDIUM: [list or "none"]
-    LOW: [list or "none"]
-    VERDICT: [SAFE TO PUSH | BLOCK — fix critical issues first]
-```
-
-**After the agent returns:**
-
-- If **VERDICT = SAFE TO PUSH** (zero Critical/High findings): proceed to Step 4 with a one-line summary (e.g., "Security scan: PASS — 0 critical, 2 low findings").
-
-- If **any findings exist (Critical, High, Medium, or Low):** present EACH finding to the user individually using `AskUserQuestion` as a prehook-style gate. Walk through findings from most severe to least severe.
-
-**For each finding, use this AskUserQuestion format:**
-
-```
-question: "Security finding: <short description of the issue>"
-header: "<CRITICAL|HIGH|MEDIUM|LOW>"
-options:
-  - label: "Fix it — remove/redact this"
-    description: "<explain WHY this is a security violation in plain language, e.g. 'This API key is hardcoded in source code. If pushed to GitHub, anyone with repo access can steal it and rack up charges on your account.'>"
-  - label: "Keep it — I accept the risk"
-    description: "Push this as-is. I understand the risk: <1-line consequence summary>"
-  - label: "Chat about this"
-    description: "Stop — I want to discuss this finding before deciding"
-```
-
-**Rules for the prehook walkthrough:**
-- Show ONE finding at a time — do not batch them into a single question
-- For each finding, explain in the description **why** it's a violation and **what could go wrong** (credential theft, unauthorized access, data leak, etc.) — don't just name the pattern, explain the real-world impact
-- If the user selects "Fix it": perform the fix immediately (delete the secret, move to env var, add to .gitignore, etc.) before showing the next finding
-- If the user selects "Keep it": log it as an accepted risk, move to the next finding
-- If the user selects "Chat about this": stop and listen, resume only when they redirect
-- After walking through ALL findings: if ANY Critical finding was kept (not fixed), show a final warning:
+- **Python** (ruff configured, or `pyproject.toml`/`ruff.toml` present):
+  ```bash
+  ruff format --check .
+  ruff check .
   ```
-  question: "You chose to keep N critical security issue(s). Are you absolutely sure you want to push with these unresolved?"
-  header: "Final warning"
-  options:
-    - label: "Yes — push anyway"
-      description: "I accept full responsibility for these security risks"
-    - label: "Go back — let me fix them"
-      description: "Re-run the security findings I kept"
-    - label: "Cancel push"
-      description: "Abort — don't push anything"
+  Fall back to `black --check . && flake8` if that's the repo's chosen tooling.
+- **JS/TS** (`package.json` present): run whichever scripts exist —
+  ```bash
+  npm run format:check    # or: npx prettier --check .
+  npm run typecheck       # if defined (e.g. tsc -b / tsc --noEmit)
+  npm run lint            # if defined
   ```
-- Include a one-line security summary in the Step 4 confirmation showing: findings total, fixed count, accepted count (e.g., "Security scan: 4 findings — 3 fixed, 1 accepted (LOW)").
+- Honor whatever formatter/linter the repo already configures rather than imposing
+  one. If the project has no formatting tooling at all, say so and skip this gate.
 
----
+If any check reports unformatted files or errors:
+- **Stop. Do not push.**
+- Offer to fix it: run the formatter in write mode (`ruff format .`,
+  `npx prettier --write .`) plus auto-fixable lint (`ruff check --fix .`), then
+  resolve anything left by hand.
+- Commit the fix **respecting the Step 4 authorship rules** (author and committer
+  `ashcastelinocs124 <ashleyn4@illinois.edu>`), or amend it into the relevant
+  commit when that keeps history clean.
+- Re-run this gate. Push only when every check passes.
 
-### Step 4 — Show final confirmation summary + AskUserQuestion gate (BLOCKING — do not skip)
+Only proceed to Step 5 when this gate passes.
 
-Display the summary to the user:
+### Step 5 — Push
 
-```
-Ready to push:
-  Repo:    <remote URL>
-  Branch:  <branch name>
-  Files:   <list of staged files>
-  Commit:  "<proposed commit message>"
-  Author:  <your-username> <<your-email>>  ✓
-```
+Once sync is confirmed, review is done, and authorship is verified, push:
 
-Then **immediately use the `AskUserQuestion` tool** with this exact question:
+- First push of a new branch (no `UPSTREAM`):
+  `git push -u origin <branch>`
+- Existing tracking branch: `git push`
 
-```
-question: "Are you sure you want to push to <branch> on <repo>?"
-header: "Confirm push"
-options:
-  - label: "Yes, push it"
-    description: "Proceed with git push"
-  - label: "No, cancel"
-    description: "Abort — do not push anything"
-  - label: "Chat about this"
-    description: "Stop — I want to talk about this first"
-```
+Report the result: the branch pushed, the remote, the commit range, and the
+compare/PR URL if the remote prints one. If `gh` is available and the user
+wants a PR, offer `gh pr create`.
 
-**Do NOT run any git commit or git push command until the user selects "Yes, push it".**
-**If "No, cancel": abort and tell the user nothing was pushed.**
-**If "Chat about this": stop completely, listen to what they say, and wait for them to redirect before doing anything.**
+## Notes
 
-### Step 5 — Execute
-1. If first push, verify `README.md` exists; create one only if the user asks.
-2. Ensure branch is up to date (pull/rebase if needed) unless user says otherwise.
-3. Commit and push to the confirmed repo and branch.
-
----
-
-### Step 6 — Deploy (BLOCKING — use AskUserQuestion)
-
-After a successful push, always ask:
-
-```
-question: "Do you want to deploy after pushing?"
-header: "Deploy"
-options:
-  - label: "No — push only"
-    description: "Done. No deployment."
-  - label: "Vercel"
-    description: "Deploy frontend/fullstack app to Vercel"
-  - label: "Railway"
-    description: "Deploy backend or full-stack app to Railway"
-  - label: "GitHub Pages"
-    description: "Deploy static site from /docs or gh-pages branch"
-  - label: "Netlify"
-    description: "Deploy static site or JAMstack app to Netlify"
-  - label: "Chrome Web Store"
-    description: "Package and submit extension update to the Chrome Web Store"
-  - label: "Chat about this"
-    description: "Stop — I want to talk about this first"
-```
-
-**If "Chat about this":** stop completely and listen.
-
-#### Platform playbooks
-
-**Vercel:**
-```bash
-# Install CLI if needed
-npm i -g vercel
-# Deploy production
-vercel --prod
-```
-- Ask if this is a first deploy (needs `vercel link` first)
-- After deploy: print the live URL
-- Verify with `curl -s <url> | head -5`
-
-**Railway:**
-```bash
-railway up --detach
-# Then run migrations if applicable
-railway run <migrate-command>
-```
-- After deploy: `railway logs | tail -20` to check for errors
-- Print the Railway dashboard URL
-
-**GitHub Pages:**
-```bash
-# Option A — docs/ folder on main (most common)
-# Ensure Settings → Pages → Source = main / docs/
-# Nothing to run — GitHub deploys on push automatically
-
-# Option B — gh-pages branch
-npx gh-pages -d build   # or 'dist', 'out', '_site'
-```
-- Ask which option: docs/ folder vs gh-pages branch
-- If docs/ folder: confirm Pages is enabled in repo settings, print the Pages URL
-- After deploy: `curl -s <pages-url>` to verify it's live
-
-**Netlify:**
-```bash
-npm i -g netlify-cli
-netlify deploy --prod --dir=build  # adjust dir as needed
-```
-- Ask for the publish directory if not obvious (`build`, `dist`, `out`, `public`)
-- After deploy: print the live URL
-
-**Chrome Web Store:**
-- Remind user the store has a manual review process (no CLI automation)
-- Steps to walk through:
-  1. Build the production zip (exclude `node_modules`, `tests/`, dev files)
-  2. Go to [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole)
-  3. Select the extension → **Package** → **Upload new package** → upload zip
-  4. Fill in any updated store listing details
-  5. Click **Submit for review**
-- Offer to build the zip now: `zip -r extension.zip <src-dir>/ --exclude "*/node_modules/*" --exclude "*/tests/*"`
-
----
-
-## Example Prompt
-User: "push my changes"
-Assistant:
-1. Run status/diff/remote/branch checks + fix git identity if needed.
-2. **If no remote set:** run `gh repo list` → AskUserQuestion with last 5 repos + "Paste a link" option → set remote.
-3. AskUserQuestion → "Which branch?" (options: current branch / main / new branch)
-4. AskUserQuestion → "Record app for README?" (yes / have video / skip)
-5. AskUserQuestion → "Does the README need updating?" (yes / no / create)
-6. Scan for sensitive files — stop if any found.
-7. **Launch security-scanner agent** — full codebase audit. Block push if critical findings.
-8. Show confirmation summary (repo, branch, files, commit message, author, security scan result).
-9. AskUserQuestion → "Are you sure you want to push?" (Yes, push it / No, cancel)
-10. Commit and push only after explicit "Yes, push it".
-11. AskUserQuestion → "Deploy?" (No / Vercel / Railway / GitHub Pages / Netlify / Chrome Web Store)
-
----
-
-## Examples
-
-See [`examples.md`](.claude/skills/gitpush/examples.md) for full annotated walkthroughs.
-
-**Available examples:**
-- **Example 1** — Pushing files to a separate empty repo (different repo from working directory, first-time push, false-positive secret scan)
-
+- Treat the seven gates — repo/remote exists, branch chosen, review decided,
+  sync confirmed, authorship verified, no plans/internal docs included,
+  formatting/lint clean — as mandatory. Pushing is outward-facing and hard to
+  reverse, so confirm before the actual push.
+- Re-run the preflight script after any branch switch, commit, stash, or rebase
+  so decisions always reflect current state.
+- When this skill creates a commit (e.g. committing the dirty worktree in
+  Step 3), always set both author and committer explicitly:
+  ```bash
+  GIT_COMMITTER_NAME="ashcastelinocs124" \
+  GIT_COMMITTER_EMAIL="ashleyn4@illinois.edu" \
+  git commit --author="ashcastelinocs124 <ashleyn4@illinois.edu>" -m "..."
+  ```
+  Then verify with `git log -1 --format='Author: %an <%ae> | Committer: %cn <%ce>'`.
