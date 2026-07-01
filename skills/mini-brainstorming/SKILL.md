@@ -66,7 +66,7 @@ Create a task for each item and complete them in order:
 5. **Propose the approach** — your recommended approach in a sentence or two; offer an alternative only if there's a real fork.
 6. **Present the short design & get approval** — a few sentences, scaled to the change.
 7. **Build it — or plan first only if it's multi-step.** With the design approved, the gate is satisfied: for most small changes, implement directly — the approved design *is* the agreed record. Hand off to `superpowers:writing-plans` first only when the change, though small, has several ordered steps that genuinely benefit from being sequenced on paper.
-8. **Show the before/after** — once the change is made (either branch, one-shot included), run `scripts/generate_before_after.py` from the repo root to generate and open an HTML page showing each changed file side-by-side, before vs after.
+8. **Show the before/after and wait for the verdict** — once the change is made (either branch, one-shot included), run `scripts/generate_before_after.py` from the repo root. It opens an HTML page showing each changed file side-by-side with **Approve / Deny** buttons and blocks until the user clicks: Approve → wrap up; Deny → ask what's wrong and revise; timeout → ask in the conversation instead.
 
 ## Process Flow
 
@@ -83,7 +83,9 @@ digraph mini_brainstorming {
     "User approves?" [shape=diamond];
     "Multi-step?" [shape=diamond];
     "Invoke superpowers:writing-plans" [shape=doublecircle];
-    "Show before/after HTML" [shape=doublecircle];
+    "Show before/after HTML\n(Approve / Deny buttons)" [shape=box];
+    "Approved in page?" [shape=diamond];
+    "Done" [shape=doublecircle];
 
     "Glance at context" -> "Small or big?";
     "Small or big?" -> "Invoke superpowers:brainstorming" [label="big"];
@@ -97,7 +99,10 @@ digraph mini_brainstorming {
     "User approves?" -> "Multi-step?" [label="yes"];
     "Multi-step?" -> "Invoke superpowers:writing-plans" [label="yes, sequence it"];
     "Multi-step?" -> "Implement directly" [label="no, just build"];
-    "Implement directly" -> "Show before/after HTML";
+    "Implement directly" -> "Show before/after HTML\n(Approve / Deny buttons)";
+    "Show before/after HTML\n(Approve / Deny buttons)" -> "Approved in page?";
+    "Approved in page?" -> "Done" [label="approve"];
+    "Approved in page?" -> "Implement directly" [label="deny — ask what's wrong, revise"];
 }
 ```
 
@@ -230,15 +235,26 @@ python3 <skill-dir>/scripts/generate_before_after.py
 ```
 
 It diffs the working tree against `HEAD`, renders each changed file as a
-side-by-side before/after table in a single HTML page, and opens it in the
-browser. If you already committed the change, pass `--base HEAD~1`; to scope to
-specific files, list them as trailing arguments. Use `--out <path>` to control
-where the page lands and `--no-open` in headless environments (then tell the
-user the file path instead).
+side-by-side before/after table, serves the page on localhost, opens the
+browser, and **blocks until the user clicks Approve or Deny** in the page. The
+click is what resumes you: run the script in the **foreground** with a generous
+timeout (e.g. 600000 ms) and read the result when the command returns —
+
+- exit `0` / last line `APPROVED` → the user signed off; wrap up and report.
+- exit `1` / last line `DENIED` → the user rejected the change; ask what's
+  wrong in the conversation, revise, and show a fresh before/after.
+- exit `2` / last line `TIMEOUT` (default 570s) → no click arrived; fall back
+  to asking for approval directly in the conversation instead.
+
+If you already committed the change, pass `--base HEAD~1`; to scope to specific
+files, list them as trailing arguments. In headless environments (no browser),
+use `--static --out <path>` to just write the page — buttons are omitted — tell
+the user the path and ask for approval in the conversation.
 
 This closes the loop the skill opened: the design said what *would* change, the
-page shows what *did*. Don't skip it because the change was tiny — a one-file
-diff renders instantly and still beats asking the user to trust a prose summary.
+page shows what *did*, and the Approve click is the user's sign-off on it.
+Don't skip it because the change was tiny — a one-file diff renders instantly
+and still beats asking the user to trust a prose summary.
 
 ## Key Principles
 
