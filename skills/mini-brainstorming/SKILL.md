@@ -66,6 +66,7 @@ Create a task for each item and complete them in order:
 5. **Propose the approach** — your recommended approach in a sentence or two; offer an alternative only if there's a real fork.
 6. **Present the short design & get approval** — a few sentences, scaled to the change.
 7. **Build it — or plan first only if it's multi-step.** With the design approved, the gate is satisfied: for most small changes, implement directly — the approved design *is* the agreed record. Hand off to `superpowers:writing-plans` first only when the change, though small, has several ordered steps that genuinely benefit from being sequenced on paper.
+8. **Show the before/after** — once the change is made (either branch, one-shot included), run `scripts/generate_before_after.py` from the repo root to generate and open an HTML page showing each changed file side-by-side, before vs after.
 
 ## Process Flow
 
@@ -76,12 +77,13 @@ digraph mini_brainstorming {
     "Invoke superpowers:brainstorming" [shape=doublecircle];
     "Ask 2-3 prehook questions\n(incl. one-shot, one AskUserQuestion call)" [shape=box];
     "One-shot?" [shape=diamond];
-    "Implement directly" [shape=doublecircle];
+    "Implement directly" [shape=box];
     "Propose approach" [shape=box];
     "Present short design" [shape=box];
     "User approves?" [shape=diamond];
     "Multi-step?" [shape=diamond];
     "Invoke superpowers:writing-plans" [shape=doublecircle];
+    "Show before/after HTML" [shape=doublecircle];
 
     "Glance at context" -> "Small or big?";
     "Small or big?" -> "Invoke superpowers:brainstorming" [label="big"];
@@ -95,6 +97,7 @@ digraph mini_brainstorming {
     "User approves?" -> "Multi-step?" [label="yes"];
     "Multi-step?" -> "Invoke superpowers:writing-plans" [label="yes, sequence it"];
     "Multi-step?" -> "Implement directly" [label="no, just build"];
+    "Implement directly" -> "Show before/after HTML";
 }
 ```
 
@@ -169,7 +172,8 @@ Two caveats worth respecting:
   undo. This is a narrow escape hatch for genuine forks, not license to resume
   interviewing.
 - One-shot means skip the *design pass*, not skip *verification*. Still make the
-  change carefully and check it does what was asked.
+  change carefully and check it does what was asked — and still finish with the
+  before/after HTML (see "After Building" below).
 
 If the user answers that it's not one-shot, continue to the propose/design/approve
 flow below.
@@ -214,6 +218,27 @@ You usually don't need a separate committed spec document the way the full
 brainstorming skill produces one. If the user wants the design written down, drop
 it into the plan that writing-plans creates (when you make one) rather than
 starting a parallel spec file.
+
+## After Building: Show the Before/After
+
+Once the change is implemented — on **either** branch, one-shot included — give
+the user a visual record of what actually changed. Run the bundled script from
+the repo root:
+
+```bash
+python3 <skill-dir>/scripts/generate_before_after.py
+```
+
+It diffs the working tree against `HEAD`, renders each changed file as a
+side-by-side before/after table in a single HTML page, and opens it in the
+browser. If you already committed the change, pass `--base HEAD~1`; to scope to
+specific files, list them as trailing arguments. Use `--out <path>` to control
+where the page lands and `--no-open` in headless environments (then tell the
+user the file path instead).
+
+This closes the loop the skill opened: the design said what *would* change, the
+page shows what *did*. Don't skip it because the change was tiny — a one-file
+diff renders instantly and still beats asking the user to trust a prose summary.
 
 ## Key Principles
 
