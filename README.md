@@ -21,6 +21,7 @@ A curated collection of **agents** and **skills** for AI coding assistants. Plug
 - [Skill Reference](#skill-reference)
   - [code-implementation](#code-implementation-skill)
   - [gitpush](#gitpush)
+  - [mini-brainstorming](#mini-brainstorming)
   - [skill-creator](#skill-creator)
   - [skill-creator-v2](#skill-creator-v2)
   - [skill-graph](#skill-graph)
@@ -71,6 +72,7 @@ Skills are modular instruction sets that guide the agent through specialized wor
 |-------|-------------|
 | [code-implementation](#code-implementation-skill) | Full-stack feature implementation with TDD, planning, and code review |
 | [gitpush](#gitpush) | Safe push workflow with repo/branch confirmation, secret scanning, and deploy options |
+| [mini-brainstorming](#mini-brainstorming) | Express-lane design pass for small changes: 2–3 batched questions, a visual plan-review page, and an app before/after gate |
 | [skill-creator](#skill-creator) | Step-by-step guide for building new skills with scripts, references, and assets |
 | [skill-creator-v2](#skill-creator-v2) | Benchmark-driven skill creation with A/B testing via isolated sub-agents |
 | [skill-graph](#skill-graph) | Chain multiple skills into a Mermaid-rendered pipeline with approval gates |
@@ -239,6 +241,35 @@ A safe push workflow with 7 blocking gates:
 | 6 | Deploy | Optional deploy to Vercel, Railway, GitHub Pages, Netlify, or Chrome Web Store |
 
 **Safety rules:** Never force-push unless explicitly requested. Never push secrets. Always confirm repo and branch. Every security finding is presented individually with explain-why-it-matters descriptions.
+
+---
+
+### mini-brainstorming
+
+**Trigger:** `/mini-brainstorming`, or any small "add / tweak / wire up / extend" request that's about to touch code
+
+The express lane of `superpowers:brainstorming`: same destination (a design the user approved before any code), far fewer stops. Built for the one-button, one-flag, one-helper class of change where a full interview is overkill but "just build it" quietly ships the wrong thing.
+
+| Step | What Happens |
+|------|-------------|
+| 1. Scope call | Judges small vs. big from the code and says so in one line. Big/cross-cutting work is handed to `superpowers:brainstorming` instead. |
+| 2. Prehook questions | **2–3 questions in a single `AskUserQuestion` call**, options grounded in the real files. One is mandatory: *"Is this one-shot — just implement it — or do you want a quick design pass?"* |
+| 3a. One-shot path | User says one-shot → **zero further questions**, ever. Open details are resolved with the best-case reading from context; only a genuinely irreversible action gets confirmed. |
+| 3b. Design path | Short design → **plan review page** in the browser: Before ➜ After diagram, product changes, DB changes as an ER diagram, an interactive HTML mockup of the finished UI (real app shell, real design tokens, realistic data), agent-structure lanes when an agent is being built, and a chatbot to interrogate the plan. Approve/Deny buttons resume the session. |
+| 4. Build | Approved design is the record; `superpowers:writing-plans` only when the change is genuinely multi-step. |
+| 5. Before/after gate | Every build (both paths) ends with a review page: app screenshots side by side (plus `--live` deep links to the running app) for visible changes, or a diagram-first code diff for everything else. Approve/Deny + a comment box per card; the verdict is persisted so a click always counts. |
+
+**Scripts** (`scripts/`, stdlib only — `difflib` + `http.server`):
+
+| Script | Purpose |
+|--------|---------|
+| `generate_plan_review.py` | Renders the plan JSON (before/after, product & DB changes, `ui_mockup_html`, `agent_structure`) as the review page; optional Anthropic-backed chatbot (`--no-chat` to skip) |
+| `generate_visual_before_after.py` | Side-by-side app screenshots (`--pair BEFORE AFTER LABEL`) and live routes (`--live URL LABEL`) with Approve/Deny |
+| `generate_before_after.py` | Diagram-first code diff (`--summary` JSON with mermaid before/after flowcharts) with raw diff behind a toggle |
+
+All three block until the click (exit 0 = approved, 1 = denied, 2 = timeout, default 30 min) and persist the verdict + comments to `$TMPDIR/*-verdict.json`. `--static` writes the page only, for headless runs.
+
+**Key principles:** batch, don't interview · state your scope call, don't ask for it · one-shot means one shot · approval before code, even for one-liners · escalating to the full skill is a success, not a failure.
 
 ---
 
