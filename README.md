@@ -22,6 +22,7 @@ A curated collection of **agents** and **skills** for AI coding assistants. Plug
   - [code-implementation](#code-implementation-skill)
   - [gitpush](#gitpush)
   - [mini-brainstorming](#mini-brainstorming)
+  - [personal-benchmark](#personal-benchmark)
   - [skill-creator](#skill-creator)
   - [skill-creator-v2](#skill-creator-v2)
   - [skill-graph](#skill-graph)
@@ -73,6 +74,7 @@ Skills are modular instruction sets that guide the agent through specialized wor
 | [code-implementation](#code-implementation-skill) | Full-stack feature implementation with TDD, planning, and code review |
 | [gitpush](#gitpush) | Safe push workflow with repo/branch confirmation, secret scanning, and deploy options |
 | [mini-brainstorming](#mini-brainstorming) | Express-lane design pass for small changes: 2–3 batched questions, a visual plan-review page, and an app before/after gate |
+| [personal-benchmark](#personal-benchmark) | Mine your own Claude Code + Codex history into a hidden-graded benchmark and see which model is best *for your work* |
 | [skill-creator](#skill-creator) | Step-by-step guide for building new skills with scripts, references, and assets |
 | [skill-creator-v2](#skill-creator-v2) | Benchmark-driven skill creation with A/B testing via isolated sub-agents |
 | [skill-graph](#skill-graph) | Chain multiple skills into a Mermaid-rendered pipeline with approval gates |
@@ -270,6 +272,25 @@ The express lane of `superpowers:brainstorming`: same destination (a design the 
 All three block until the click (exit 0 = approved, 1 = denied, 2 = timeout, default 30 min) and persist the verdict + comments to `$TMPDIR/*-verdict.json`. `--static` writes the page only, for headless runs.
 
 **Key principles:** batch, don't interview · state your scope call, don't ask for it · one-shot means one shot · approval before code, even for one-liners · escalating to the full skill is a success, not a failure.
+
+---
+
+### personal-benchmark
+
+**Trigger:** "build my personal benchmark", "add gpt-7 to my benchmark", "run / refresh my benchmark", or "which model should I switch to?"
+
+Public benchmarks measure someone else's work. This one mines your local agent transcripts (`~/.claude/projects`, `~/.codex/sessions`), finds the tasks you repeat and the ones where agents needed correcting, and turns them into a small suite you can point at every new model release.
+
+| Step | What Happens |
+|------|-------------|
+| 1. Setup | `scripts/setup.py` checks tools, mines your history (secrets redacted, corpus only grows), and writes `models.json` from the models you use most |
+| 2. Build suite | The agent clusters your prompts into archetypes and writes 12–20 tasks **in your own voice**: small offline fixture, hidden `check.sh` or LLM rubric, reference solution |
+| 3. Validate | `run.py --validate`: every check must fail on the starter code and pass on the solution |
+| 4. Run | Each model runs each task in a throwaway dir via `claude -p`, `codex exec`, or any custom CLI agent. Results are cached per task hash, so a new model only runs what it hasn't |
+| 5. Dashboard | `report.py --open`: leaderboard, category heatmap, weekly trend, score vs speed/cost, and a per-task drill-down with the grader's reason |
+| 6. Weekly refresh | Re-mine, add or retire a few tasks, watch for new model releases, rerun |
+
+**Scripts** (`scripts/`, stdlib only): `setup.py` · `mine.py` · `run.py` · `report.py`. See the skill's own `README.md` for config and privacy notes.
 
 ---
 

@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Personal Benchmark</title>
+<style>
+:root{
+  color-scheme:light;
+  --page:#f9f9f7; --surface:#fcfcfb; --raised:#ffffff;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --wash:rgba(11,11,11,.04);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+  --good:#0ca30c; --good-text:#006300; --critical:#d03b3b; --warn:#fab219;
+  --seq: #cde2fb,#b7d3f6,#9ec5f4,#86b6ef,#6da7ec,#5598e7,#3987e5,#2a78d6,#256abf,#1c5cab,#184f95,#104281;
+}
+@media (prefers-color-scheme:dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme:dark;
+    --page:#0d0d0d; --surface:#1a1a19; --raised:#222220;
+    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10); --wash:rgba(255,255,255,.05);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+    --good-text:#0ca30c;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#0d0d0d; --surface:#1a1a19; --raised:#222220;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10); --wash:rgba(255,255,255,.05);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --good-text:#0ca30c;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 16px 64px}
+header.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--ink-2);margin-top:2px}
+.controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ring);background:var(--surface);color:var(--ink);
+  border-radius:999px;padding:4px 10px;font:inherit;font-size:13px;cursor:pointer}
+.chip:hover{background:var(--wash)}
+.chip[aria-pressed="false"]{color:var(--muted)}
+.chip[aria-pressed="false"] .dot{background:transparent!important;box-shadow:inset 0 0 0 2px var(--axis)}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.iconbtn{border:1px solid var(--ring);background:var(--surface);color:var(--ink-2);border-radius:8px;padding:4px 8px;cursor:pointer;font:inherit}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.tile{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:14px 16px}
+.tile .k{color:var(--ink-2);font-size:12px}
+.tile .v{font-size:26px;font-weight:600;margin-top:2px;display:flex;align-items:center;gap:8px}
+.tile .n{color:var(--ink-2);font-size:12.5px;margin-top:2px}
+.card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:16px;margin-bottom:16px;min-width:0}
+.card h2{font-size:15px;margin:0}
+.card .hint{color:var(--muted);font-size:12.5px;margin:2px 0 12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid2>.card{margin-bottom:0}
+.row2{margin-bottom:16px}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grid);white-space:nowrap}
+th{color:var(--muted);font-weight:500;font-size:12px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+.bar{position:relative;height:8px;width:140px;background:var(--grid);border-radius:4px;display:inline-block;vertical-align:middle;margin-left:8px}
+.bar>i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.delta-up{color:var(--good-text)} .delta-down{color:var(--critical)} .delta-flat{color:var(--muted)}
+.badge{font-size:11.5px;border:1px solid var(--ring);border-radius:6px;padding:1px 6px;color:var(--ink-2);background:var(--page)}
+svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+svg .lbl{fill:var(--ink-2);font-size:11.5px}
+.heat td{padding:0;border-bottom:none}
+.heat td.cell{padding:2px}
+.heat .c{border-radius:6px;height:34px;display:flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;font-size:13px;cursor:default}
+.heat{table-layout:fixed}
+.heat th{padding:4px 3px;font-size:11px;white-space:normal;line-height:1.2;text-align:center;vertical-align:bottom;word-break:break-word}
+.heat th:first-child,.heat td.name{width:112px}
+.heat td.name{padding-right:8px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis}
+.tasks td{vertical-align:middle}
+.tasks .res{cursor:pointer;border-radius:6px;padding:4px 8px;text-align:center;border:1px solid transparent;font-variant-numeric:tabular-nums}
+.tasks .res:hover{border-color:var(--axis);background:var(--wash)}
+.pass{color:var(--good-text);font-weight:600}
+.fail{color:var(--critical);font-weight:600}
+.na{color:var(--muted)}
+.tip{position:fixed;pointer-events:none;background:var(--raised);color:var(--ink);border:1px solid var(--ring);border-radius:8px;
+  padding:8px 10px;font-size:12.5px;box-shadow:0 4px 18px rgba(0,0,0,.12);z-index:30;display:none;max-width:280px}
+.tip b{font-weight:600}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--surface);border-left:1px solid var(--ring);
+  box-shadow:-8px 0 30px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .18s ease;z-index:40;display:flex;flex-direction:column}
+.drawer.open{transform:none}
+.drawer header{padding:16px 18px;border-bottom:1px solid var(--grid)}
+.drawer .body{padding:14px 18px;overflow:auto;flex:1}
+.drawer h3{margin:0;font-size:16px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-top:10px}
+.tab{border:1px solid var(--ring);background:var(--page);border-radius:8px;padding:4px 10px;cursor:pointer;font:inherit;font-size:12.5px;color:var(--ink)}
+.tab[aria-selected="true"]{background:var(--ink);color:var(--page);border-color:var(--ink)}
+.sec{margin:14px 0 4px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+pre{background:var(--page);border:1px solid var(--grid);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-word;
+  font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;margin:0;max-height:260px;overflow:auto;color:var(--ink)}
+.prompt{background:var(--page);border-left:3px solid var(--axis);padding:8px 12px;border-radius:0 8px 8px 0;font-size:13.5px}
+.verdict{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;color:var(--ink-2);font-size:13px}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .18s;z-index:35}
+.scrim.open{opacity:1;pointer-events:auto}
+.empty{color:var(--muted);padding:24px;text-align:center}
+@media (max-width:860px){.tiles{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}}
+@media (max-width:480px){.tiles{grid-template-columns:1fr}.bar{width:70px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Personal Benchmark</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="controls" id="controls"></div>
+  </header>
+
+  <section class="tiles" id="tiles"></section>
+
+  <section class="card">
+    <h2>Leaderboard</h2>
+    <div class="hint">Weighted pass rate on your suite. Weights follow how often you do each kind of task.</div>
+    <div class="scroll"><table id="board"></table></div>
+  </section>
+
+  <div class="grid2 row2">
+    <section class="card">
+      <h2>By category</h2>
+      <div class="hint">Pass rate per task category. Hover a cell for the tasks behind it.</div>
+      <div class="scroll"><table class="heat" id="heat"></table></div>
+    </section>
+    <section class="card">
+      <h2>Score by week</h2>
+      <div class="hint">Weekly snapshot after each refresh. Hover for exact scores.</div>
+      <svg id="trend" viewBox="0 0 560 260" width="100%" role="img" aria-label="Score by week per model"></svg>
+    </section>
+  </div>
+
+  <div class="grid2 row2">
+    <section class="card">
+      <h2>Score vs speed</h2>
+      <div class="hint">Median wall-clock seconds per task. Up and to the left is better.</div>
+      <svg id="speed" viewBox="0 0 560 240" width="100%" role="img" aria-label="Score versus median seconds"></svg>
+    </section>
+    <section class="card">
+      <h2>Score vs cost</h2>
+      <div class="hint">Average $ per task (Claude runs report cost; Codex runs report tokens only).</div>
+      <svg id="cost" viewBox="0 0 560 240" width="100%" role="img" aria-label="Score versus cost per task"></svg>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Every task</h2>
+    <div class="hint">Click any result to see the prompt, the model's answer, and why the grader passed or failed it.</div>
+    <div class="scroll"><table class="tasks" id="tasks"></table></div>
+  </section>
+</div>
+
+<div class="tip" id="tip"></div>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <header>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+      <div><h3 id="dTitle"></h3><div class="sub" id="dMeta" style="font-size:12.5px"></div></div>
+      <button class="iconbtn" id="dClose" aria-label="Close">✕</button>
+    </div>
+    <div class="tabs" id="dTabs" role="tablist"></div>
+  </header>
+  <div class="body" id="dBody"></div>
+</aside>
+
+<script>
+const DATA = /*__DATA__*/null/*__END__*/;
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const cssVar = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const models = DATA.models.map((m, i) => ({...m, slot: `--s${(i % 8) + 1}`}));   // color follows the entity, by config order
+const color = name => cssVar(models.find(m => m.name === name).slot);
+let visible = new Set(models.filter(m => m.active !== false).map(m => m.name));
+try { const saved = JSON.parse(localStorage.getItem("pb-visible")); if (saved) visible = new Set(saved.filter(n => models.some(m => m.name === n))); } catch (e) {}
+
+// ---------- scoring (mirrors report.py) ----------
+const res = (m, t) => (DATA.results[m] || {})[t];
+function score(m) {
+  let w = 0, p = 0, n = 0;
+  for (const t of DATA.tasks) { const r = res(m, t.id); if (!r || r.ungraded) continue; n++; w += t.weight || 1; p += (t.weight || 1) * (r.passed ? 1 : 0); }
+  return n ? {score: Math.round(1000 * p / w) / 10, n} : null;
+}
+function catScore(m, c) {
+  const rs = DATA.tasks.filter(t => t.category === c).map(t => res(m, t.id)).filter(r => r && !r.ungraded);
+  return rs.length ? {pct: Math.round(100 * rs.filter(r => r.passed).length / rs.length), n: rs.length,
+    tasks: DATA.tasks.filter(t => t.category === c).map(t => ({t, r: res(m, t.id)}))} : null;
+}
+const median = a => { const s = a.filter(x => x != null).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
+const stat = (m, k) => median(DATA.tasks.map(t => res(m, t.id)?.[k]));
+const avgCost = m => { const c = DATA.tasks.map(t => res(m, t.id)?.cost_usd).filter(x => x != null); return c.length ? c.reduce((a, b) => a + b, 0) / c.length : null; };
+function weeks() { return [...new Set(DATA.history.map(h => h.week))].sort(); }
+function weekScore(m, w) { const h = DATA.history.filter(h => h.model === m && h.week === w).pop(); return h ? h.score : null; }
+function delta(m) { const ws = weeks(); if (ws.length < 2) return null; const a = weekScore(m, ws[ws.length - 2]), b = weekScore(m, ws[ws.length - 1]); return a == null || b == null ? null : Math.round((b - a) * 10) / 10; }
+const fmtDelta = d => d == null ? `<span class="delta-flat">new</span>` : d > 0 ? `<span class="delta-up">▲ ${d}</span>` : d < 0 ? `<span class="delta-down">▼ ${-d}</span>` : `<span class="delta-flat">–</span>`;
+const ranked = () => models.filter(m => visible.has(m.name)).map(m => ({...m, s: score(m.name)})).filter(m => m.s).sort((a, b) => b.s.score - a.s.score);
+
+// ---------- tooltip ----------
+const tip = $("#tip");
+function showTip(e, html) { tip.innerHTML = html; tip.style.display = "block"; const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8); tip.style.left = x + "px"; tip.style.top = y + "px"; }
+const hideTip = () => tip.style.display = "none";
+
+// ---------- header + filters ----------
+function renderHeader() {
+  const c = DATA.corpus || {};
+  $("#sub").textContent = `Updated ${DATA.generated} · ${DATA.tasks.length} tasks across ${DATA.categories.length} categories · mined from ${c.prompts?.toLocaleString() ?? "?"} of your prompts`;
+  $("#controls").innerHTML = models.map(m =>
+    `<button class="chip" data-m="${esc(m.name)}" aria-pressed="${visible.has(m.name)}"><span class="dot" style="background:var(${m.slot})"></span>${esc(m.name)}</button>`).join("")
+    + `<button class="iconbtn" id="theme" title="Toggle light/dark">◐</button>`;
+  document.querySelectorAll(".chip").forEach(b => b.onclick = () => {
+    const n = b.dataset.m; visible.has(n) ? visible.delete(n) : visible.add(n);
+    try { localStorage.setItem("pb-visible", JSON.stringify([...visible])); } catch (e) {}
+    renderAll();
+  });
+  $("#theme").onclick = () => {
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+    document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+    renderAll();
+  };
+}
+
+// ---------- tiles ----------
+function renderTiles() {
+  const r = ranked();
+  if (!r.length) { $("#tiles").innerHTML = ""; return; }
+  const best = r[0], drv = r.find(m => m.name === DATA.daily_driver);
+  const movers = r.map(m => ({m, d: delta(m.name)})).filter(x => x.d != null).sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+  const unsolved = DATA.tasks.filter(t => r.every(m => { const x = res(m.name, t.id); return x && !x.passed; }));
+  const dot = n => `<span class="dot" style="background:var(${models.find(m => m.name === n).slot})"></span>`;
+  $("#tiles").innerHTML = `
+    <div class="tile"><div class="k">Best for your work</div><div class="v">${dot(best.name)}${esc(best.name)}</div><div class="n">${best.s.score} weighted score</div></div>
+    <div class="tile"><div class="k">Your daily driver</div><div class="v">${drv ? dot(drv.name) + esc(drv.name) : esc(DATA.daily_driver || "–")}</div>
+      <div class="n">${drv ? `#${r.indexOf(drv) + 1} of ${r.length} · ${drv === best ? "already the best pick" : (best.s.score - drv.s.score).toFixed(1) + " pts behind " + esc(best.name)}` : "not benchmarked yet"}</div></div>
+    <div class="tile"><div class="k">Biggest mover this week</div><div class="v">${movers.length ? dot(movers[0].m.name) + esc(movers[0].m.name) : "–"}</div><div class="n">${movers.length ? fmtDelta(movers[0].d) + " vs last week" : "needs two weeks of history"}</div></div>
+    <div class="tile"><div class="k">Unsolved by every model</div><div class="v">${unsolved.length}</div><div class="n">${unsolved.length ? esc(unsolved.map(t => t.id.split("-")[0]).join(", ")) + " — suite gaps, not model signal" : "no task is failed by every model"}</div></div>`;
+}
+
+// ---------- leaderboard ----------
+function renderBoard() {
+  const r = ranked();
+  $("#board").innerHTML = `<tr><th>#</th><th>Model</th><th>Score</th><th class="num">Δ week</th><th class="num">Passed</th><th class="num">Median s</th><th class="num">$ / task</th><th>Harness</th></tr>` +
+    r.map((m, i) => {
+      const passed = DATA.tasks.filter(t => res(m.name, t.id)?.passed).length, ac = avgCost(m.name);
+      return `<tr><td class="num" style="text-align:left">${i + 1}</td>
+        <td><span class="dot" style="background:var(${m.slot});margin-right:8px"></span>${esc(m.name)}</td>
+        <td><b style="font-variant-numeric:tabular-nums">${m.s.score.toFixed(1)}</b><span class="bar"><i style="width:${m.s.score}%;background:var(${m.slot})"></i></span></td>
+        <td class="num">${fmtDelta(delta(m.name))}</td>
+        <td class="num">${passed}/${m.s.n}${m.s.n < DATA.tasks.length ? ` <span class="badge" title="not run on every task yet">partial</span>` : ""}</td>
+        <td class="num">${stat(m.name, "seconds") ?? "–"}</td>
+        <td class="num">${ac == null ? "–" : "$" + ac.toFixed(2)}</td>
+        <td><span class="badge">${esc(m.harness)}</span> <span class="na" style="font-size:12px">${esc(m.model)}</span></td></tr>`;
+    }).join("") || `<tr><td class="empty" colspan="8">No results yet. Run <code>scripts/run.py</code>.</td></tr>`;
+}
+
+// ---------- category heatmap (sequential blue) ----------
+function seqColor(p) { const s = cssVar("--seq").split(",").map(x => x.trim()); return s[Math.min(s.length - 1, Math.round(p / 100 * (s.length - 1)))]; }
+function renderHeat() {
+  const r = ranked(), cats = DATA.categories;
+  $("#heat").innerHTML = `<tr><th></th>${cats.map(c => `<th>${esc(c)}</th>`).join("")}</tr>` + r.map(m =>
+    `<tr><td class="name"><span class="dot" style="background:var(${m.slot});margin-right:6px"></span>${esc(m.name)}</td>` +
+    cats.map(c => { const s = catScore(m.name, c); if (!s) return `<td class="cell"><div class="c na">–</div></td>`;
+      const bg = seqColor(s.pct), dark = s.pct >= 58;
+      return `<td class="cell"><div class="c" data-m="${esc(m.name)}" data-c="${esc(c)}" style="background:${bg};color:${dark ? "#fff" : "#0b0b0b"}">${s.pct}</div></td>`; }).join("") + `</tr>`).join("");
+  document.querySelectorAll("#heat .c[data-m]").forEach(el => {
+    el.onmousemove = e => { const s = catScore(el.dataset.m, el.dataset.c);
+      showTip(e, `<b>${esc(el.dataset.m)}</b> · ${esc(el.dataset.c)}<br>${s.tasks.map(({t, r}) => `${r ? (r.passed ? "✅" : "❌") : "–"} ${esc(t.title)}`).join("<br>")}`); };
+    el.onmouseleave = hideTip;
+  });
+}
+
+// ---------- svg helpers ----------
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; }
+function axes(svg, W, H, P, xTicks, yTicks, xFmt, yFmt, xs, ys) {
+  for (const v of yTicks) { const y = ys(v); el("line", {x1: P.l, x2: W - P.r, y1: y, y2: y, stroke: cssVar("--grid")}, svg); el("text", {x: P.l - 8, y: y + 4, "text-anchor": "end"}, svg).textContent = yFmt(v); }
+  el("line", {x1: P.l, x2: W - P.r, y1: H - P.b, y2: H - P.b, stroke: cssVar("--axis")}, svg);
+  for (const v of xTicks) el("text", {x: xs(v), y: H - P.b + 16, "text-anchor": "middle"}, svg).textContent = xFmt(v);
+}
+function niceTicks(lo, hi) {  // round steps so axes read 90/95/100, not 93/98
+  const span = hi - lo, step = span <= 20 ? 5 : span <= 50 ? 10 : 20, out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v);
+  return out;
+}
+function placeLabels(items, minGap, lo, hi) {  // nudge end labels apart vertically
+  items.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < items.length; i++) if (items[i].y - items[i - 1].y < minGap) items[i].y = items[i - 1].y + minGap;
+  const over = items.length ? items[items.length - 1].y - hi : 0; if (over > 0) items.forEach(i => i.y -= over);
+  return items;
+}
+
+// ---------- trend ----------
+function renderTrend() {
+  const svg = $("#trend"); svg.innerHTML = "";
+  const W = 560, H = 260, P = {l: 36, r: 96, t: 12, b: 26}, ws = weeks(), r = ranked();
+  if (ws.length < 1 || !r.length) { el("text", {x: W / 2, y: H / 2, "text-anchor": "middle"}, svg).textContent = "Trend appears after the first weekly refresh"; return; }
+  const vals = DATA.history.filter(h => visible.has(h.model)).map(h => h.score);
+  const lo = Math.max(0, Math.floor((Math.min(...vals) - 8) / 10) * 10), hi = 100;
+  const xs = i => P.l + (ws.length === 1 ? (W - P.l - P.r) / 2 : i * (W - P.l - P.r) / (ws.length - 1));
+  const ys = v => P.t + (hi - v) * (H - P.t - P.b) / (hi - lo);
+  const yt = niceTicks(lo, hi);
+  axes(svg, W, H, P, ws.map((_, i) => i), yt, i => ws[i].replace(/^\d{4}-/, ""), v => v, xs, ys);
+  const ends = [];
+  for (const m of r) {
+    const pts = ws.map((w, i) => [i, weekScore(m.name, w)]).filter(p => p[1] != null);
+    if (!pts.length) continue;
+    el("path", {d: pts.map((p, j) => `${j ? "L" : "M"}${xs(p[0])},${ys(p[1])}`).join(""), fill: "none", stroke: color(m.name), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
+    for (const p of pts) el("circle", {cx: xs(p[0]), cy: ys(p[1]), r: 3.5, fill: color(m.name), stroke: cssVar("--surface"), "stroke-width": 2}, svg);
+    const last = pts[pts.length - 1]; ends.push({name: m.name, x: xs(last[0]), y: ys(last[1])});
+  }
+  for (const e of placeLabels(ends, 14, P.t, H - P.b)) el("text", {x: e.x + 8, y: e.y + 4, class: "lbl"}, svg).textContent = e.name;
+  const cross = el("line", {y1: P.t, y2: H - P.b, stroke: cssVar("--axis"), "stroke-dasharray": "3 3", visibility: "hidden"}, svg);
+  const hit = el("rect", {x: P.l, y: P.t, width: W - P.l - P.r, height: H - P.t - P.b, fill: "transparent"}, svg);
+  hit.onmousemove = e => {
+    const b = svg.getBoundingClientRect(), x = (e.clientX - b.left) * W / b.width;
+    const i = Math.max(0, Math.min(ws.length - 1, Math.round((x - P.l) / ((W - P.l - P.r) / Math.max(1, ws.length - 1)))));
+    cross.setAttribute("x1", xs(i)); cross.setAttribute("x2", xs(i)); cross.setAttribute("visibility", "visible");
+    const rows = r.map(m => ({m, v: weekScore(m.name, ws[i])})).filter(x => x.v != null).sort((a, b) => b.v - a.v);
+    showTip(e, `<b>${ws[i]}</b><br>` + rows.map(x => `<span class="dot" style="background:${color(x.m.name)}"></span> ${esc(x.m.name)} <b style="float:right;margin-left:14px">${x.v}</b>`).join("<br>"));
+  };
+  hit.onmouseleave = () => { cross.setAttribute("visibility", "hidden"); hideTip(); };
+}
+
+// ---------- scatters ----------
+function scatter(id, xOf, xFmt, xLabel) {
+  const svg = $(id); svg.innerHTML = "";
+  const W = 560, H = 240, P = {l: 36, r: 24, t: 14, b: 34};
+  const pts = ranked().map(m => ({m, x: xOf(m.name), y: m.s.score})).filter(p => p.x != null);
+  if (!pts.length) { el("text", {x: W / 2, y: H / 2, "text-anchor": "middle"}, svg).textContent = "No data for this view yet"; return; }
+  const xmax = Math.max(...pts.map(p => p.x)) * 1.15 || 1, ylo = Math.max(0, Math.floor((Math.min(...pts.map(p => p.y)) - 10) / 10) * 10);
+  const xs = v => P.l + v * (W - P.l - P.r) / xmax, ys = v => P.t + (100 - v) * (H - P.t - P.b) / (100 - ylo);
+  const xt = [0, xmax / 3, 2 * xmax / 3, xmax], yt = niceTicks(ylo, 100);
+  axes(svg, W, H, P, xt, yt, xFmt, v => v, xs, ys);
+  el("text", {x: W - P.r, y: H - 4, "text-anchor": "end"}, svg).textContent = xLabel;
+  const labels = [];
+  for (const p of pts) {
+    const c = el("circle", {cx: xs(p.x), cy: ys(p.y), r: 6, fill: color(p.m.name), stroke: cssVar("--surface"), "stroke-width": 2}, svg);
+    const hit = el("circle", {cx: xs(p.x), cy: ys(p.y), r: 14, fill: "transparent"}, svg);
+    hit.onmousemove = e => showTip(e, `<b>${esc(p.m.name)}</b><br>score ${p.y}<br>${xLabel}: ${xFmt(p.x)}`);
+    hit.onmouseleave = hideTip;
+    labels.push({name: p.m.name, x: xs(p.x), y: ys(p.y)});
+  }
+  for (const l of placeLabels(labels, 13, P.t, H - P.b)) el("text", {x: l.x + 10, y: l.y + 4, class: "lbl"}, svg).textContent = l.name;
+}
+
+// ---------- tasks matrix + drawer ----------
+function cellHTML(r) {
+  if (!r) return `<span class="na">–</span>`;
+  const js = r.judge_score != null ? ` <span class="na" style="font-weight:400">${r.judge_score}/10</span>` : "";
+  return r.passed ? `<span class="pass" title="pass">✓</span>${js}` : `<span class="fail" title="fail">✕</span>${js}`;
+}
+function renderTasks() {
+  const r = ranked();
+  $("#tasks").innerHTML = `<tr><th>Task</th><th>Category</th><th class="num">Weight</th>${r.map(m => `<th style="text-align:center"><span class="dot" style="background:var(${m.slot});margin-right:6px"></span>${esc(m.name)}</th>`).join("")}</tr>` +
+    DATA.tasks.map(t => `<tr><td><div>${esc(t.title)}</div><div class="na" style="font-size:12px">${esc(t.id)} · ${esc(t.grading)}</div></td>
+      <td><span class="badge">${esc(t.category)}</span></td><td class="num">${t.weight ?? 1}</td>
+      ${r.map(m => `<td><div class="res" data-t="${esc(t.id)}" data-m="${esc(m.name)}">${cellHTML(res(m.name, t.id))}</div></td>`).join("")}</tr>`).join("");
+  document.querySelectorAll("#tasks .res").forEach(c => c.onclick = () => openDrawer(c.dataset.t, c.dataset.m));
+}
+let drawerTask = null;
+function openDrawer(tid, mname) {
+  const t = DATA.tasks.find(t => t.id === tid); drawerTask = tid;
+  $("#dTitle").textContent = t.title;
+  $("#dMeta").textContent = `${t.id} · ${t.category} · weight ${t.weight ?? 1} · graded by ${t.grading}`;
+  const r = ranked();
+  $("#dTabs").innerHTML = r.map(m => `<button class="tab" role="tab" data-m="${esc(m.name)}" aria-selected="${m.name === mname}">${esc(m.name)} ${res(m.name, tid) ? (res(m.name, tid).passed ? "✓" : "✕") : "–"}</button>`).join("");
+  document.querySelectorAll("#dTabs .tab").forEach(b => b.onclick = () => openDrawer(tid, b.dataset.m));
+  const x = res(mname, tid);
+  $("#dBody").innerHTML = `<div class="sec">Prompt (as you'd type it)</div><div class="prompt">${esc(t.prompt)}</div>` + (x ? `
+    <div class="sec">Verdict</div>
+    <div style="font-size:15px">${cellHTML(x)}</div>
+    <div class="verdict"><span>⏱ ${x.seconds}s</span>${x.cost_usd != null ? `<span>$${x.cost_usd.toFixed(2)}</span>` : ""}${x.tokens != null ? `<span>${x.tokens.toLocaleString()} tokens</span>` : ""}${x.timed_out ? `<span class="fail">timed out</span>` : ""}<span>run ${esc(x.date)}</span></div>
+    ${x.judge_reason ? `<div class="sec">Grader's reason</div><div>${esc(x.judge_reason)}</div>` : ""}
+    ${x.check_log ? `<div class="sec">Hidden check output</div><pre>${esc(x.check_log)}</pre>` : ""}
+    <div class="sec">Model's final message</div><pre>${esc(x.final_message || "(empty)")}</pre>` : `<div class="empty">${esc(mname)} hasn't run this task yet.</div>`);
+  $("#drawer").classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("open");
+}
+function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("open"); drawerTask = null; }
+$("#dClose").onclick = closeDrawer; $("#scrim").onclick = closeDrawer;
+addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+
+function renderAll() {
+  renderHeader(); renderTiles(); renderBoard(); renderHeat(); renderTrend();
+  scatter("#speed", m => stat(m, "seconds"), v => Math.round(v) + "s", "median seconds");
+  scatter("#cost", avgCost, v => "$" + v.toFixed(2), "$ per task");
+  renderTasks();
+}
+renderAll();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+</script>
+</body>
+</html>
