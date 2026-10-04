@@ -74,7 +74,7 @@ Skills are modular instruction sets that guide the agent through specialized wor
 | [code-implementation](#code-implementation-skill) | Full-stack feature implementation with TDD, planning, and code review |
 | [gitpush](#gitpush) | Safe push workflow with repo/branch confirmation, secret scanning, and deploy options |
 | [mini-brainstorming](#mini-brainstorming) | Express-lane design pass for small changes: 2–3 batched questions, a visual plan-review page, and an app before/after gate |
-| [personal-benchmark](#personal-benchmark) | Mine your own Claude Code + Codex history into a hidden-graded benchmark and see which model is best *for your work* |
+| [personal-benchmark](#personal-benchmark) | Mine your own Claude Code + Codex history into a sandboxed, hidden-graded benchmark and see which model is best *for your work* |
 | [skill-creator](#skill-creator) | Step-by-step guide for building new skills with scripts, references, and assets |
 | [skill-creator-v2](#skill-creator-v2) | Benchmark-driven skill creation with A/B testing via isolated sub-agents |
 | [skill-graph](#skill-graph) | Chain multiple skills into a Mermaid-rendered pipeline with approval gates |
@@ -283,12 +283,14 @@ Public benchmarks measure someone else's work. This one mines your local agent t
 
 | Step | What Happens |
 |------|-------------|
-| 1. Setup | `scripts/setup.py` checks tools, mines your history (secrets redacted, corpus only grows), and writes `models.json` from the models you use most |
+| 1. Setup | `scripts/setup.py` checks tools, mines your history (secrets redacted, corpus only grows), writes `models.json` from the models you use most, and asks per CLI whether to bill runs to **your plan** (Claude Code / ChatGPT login) or **an API key** (hidden prompt, saved `chmod 600`) |
 | 2. Build suite | The agent clusters your prompts into archetypes and writes 12–20 tasks **in your own voice**: small offline fixture, hidden `check.sh` or LLM rubric, reference solution |
 | 3. Validate | `run.py --validate`: every check must fail on the starter code and pass on the solution |
-| 4. Run | Each model runs each task in a throwaway dir via `claude -p`, `codex exec`, or any custom CLI agent. Results are cached per task hash, so a new model only runs what it hasn't |
+| 4. Run | Each model runs each task in a throwaway, **OS-sandboxed** dir via `claude -p`, `codex exec`, or any custom CLI agent. Open-ended tasks are graded by the agent you're running in. Results are cached per task hash, so a new model only runs what it hasn't |
 | 5. Dashboard | `report.py --open`: leaderboard, category heatmap, weekly trend, score vs speed/cost, and a per-task drill-down with the grader's reason |
 | 6. Weekly refresh | Re-mine, add or retire a few tasks, watch for new model releases, rerun |
+
+**Safety:** benchmarked agents can only write inside their task folder (Claude Code's Bash sandbox + accept-edits; Codex `workspace-write`), and grading, which runs agent-written code, is sandboxed too (`sandbox-exec` on macOS, `bwrap` on Linux; no network, git's command-running settings overridden). An agent never touches your real files or config.
 
 **Scripts** (`scripts/`, stdlib only): `setup.py` · `mine.py` · `run.py` · `report.py`. See the skill's own `README.md` for config and privacy notes.
 
