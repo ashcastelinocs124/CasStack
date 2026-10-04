@@ -81,7 +81,7 @@ def main():
         "models": [{k: m.get(k) for k in ("name", "harness", "model", "active")} for m in shown],
         "results": {n: {tid: {"passed": r["passed"], "ungraded": r.get("ungraded", False),
                               "judge_score": r.get("judge_score"), "judge_reason": r.get("judge_reason"),
-                              "check_log": r.get("check_log"), "final_message": r.get("final_message"),
+                              "check_log": r.get("check_log"), "final_message": r.get("final_message"), "diff": r.get("diff"),
                               "seconds": r.get("seconds"), "timed_out": r.get("timed_out"), "date": r.get("date", "")[:10],
                               "cost_usd": (r.get("usage") or {}).get("cost_usd"),
                               "tokens": (r.get("usage") or {}).get("total_tokens")}

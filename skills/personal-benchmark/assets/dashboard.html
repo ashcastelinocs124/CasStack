@@ -379,7 +379,8 @@ function openDrawer(tid, mname) {
     <div class="verdict"><span>⏱ ${x.seconds}s</span>${x.cost_usd != null ? `<span>$${x.cost_usd.toFixed(2)}</span>` : ""}${x.tokens != null ? `<span>${x.tokens.toLocaleString()} tokens</span>` : ""}${x.timed_out ? `<span class="fail">timed out</span>` : ""}<span>run ${esc(x.date)}</span></div>
     ${x.judge_reason ? `<div class="sec">Grader's reason</div><div>${esc(x.judge_reason)}</div>` : ""}
     ${x.check_log ? `<div class="sec">Hidden check output</div><pre>${esc(x.check_log)}</pre>` : ""}
-    <div class="sec">Model's final message</div><pre>${esc(x.final_message || "(empty)")}</pre>` : `<div class="empty">${esc(mname)} hasn't run this task yet.</div>`);
+    <div class="sec">Model's final message</div><pre>${esc(x.final_message || "(empty)")}</pre>
+    ${x.diff ? `<div class="sec">Changes it made</div><pre>${esc(x.diff)}</pre>` : ""}` : `<div class="empty">${esc(mname)} hasn't run this task yet.</div>`);
   $("#drawer").classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("open");
 }
 function closeDrawer() { $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("open"); drawerTask = null; }

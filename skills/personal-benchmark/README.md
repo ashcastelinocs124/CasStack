@@ -34,7 +34,11 @@ mkdir -p ~/.codex/skills && ln -s ~/.claude/skills/personal-benchmark ~/.codex/s
 ```
 
 `setup.py` checks your tools, mines your history into `~/.personal-benchmark/`, and writes
-`models.json` from the models you use most. `--check-auth` sends one tiny prompt through each
+`models.json` from the models you use most. For each CLI it then asks whether to bill runs to
+**your plan** (Claude Code login / ChatGPT login for Codex) or **an API key**. If you pick API, it
+uses the key already in your environment or asks for it with hidden input and saves it to
+`~/.personal-benchmark/.keys` (readable only by you). Skip the questions with
+`--claude-auth plan|api --codex-auth plan|api`. `--check-auth` sends one tiny prompt through each
 CLI to confirm you're logged in. It's safe to re-run.
 
 ## Use
@@ -75,6 +79,7 @@ To configure models, edit `models.json`:
 
 ```json
 {
+  "auth": {"claude": "plan", "codex": "plan"},
   "judge": {"harness": "claude", "model": "claude-opus-5-5"},
   "models": [
     {"name": "opus-5.5", "harness": "claude", "model": "claude-opus-5-5"},
@@ -86,11 +91,18 @@ To configure models, edit `models.json`:
 
 ## Good to know
 
+- **Sandboxed.** Benchmarked agents can only write inside their throwaway task folder (Claude Code's
+  Bash sandbox + accept-edits mode; Codex's `workspace-write` sandbox), so they can't touch your real
+  files even though they see your real config. Grading runs agent-written code, so it's sandboxed
+  too: `sandbox-exec` on macOS, `bwrap` (bubblewrap) on Linux, with writes limited to the task folder
+  and no network. On Linux, install bubblewrap; without it, grading runs unsandboxed and prints a warning.
 - **Runs use your real setup.** Your global CLAUDE.md, hooks and plugins apply to every run, so
   the score is "model + your config". For a model-only comparison with an API key, add
   `"extra_args": ["--bare"]`.
-- **API keys are ignored by default.** `claude` runs drop `ANTHROPIC_API_KEY` so they use your
-  subscription login. Set `"use_api_key": true` on a model to bill the key instead.
+- **Plan or API key, your choice per CLI.** Every run goes through the Claude Code / Codex CLIs.
+  On "plan", API keys in your shell are ignored so they can't silently take over billing. On "api",
+  the key is used. Switch any time: `setup.py --claude-auth api`. Open-ended tasks are graded by
+  whichever agent you run the skill from (Claude Code or Codex).
 - **History expires.** Claude Code deletes transcripts after 30 days by default. The benchmark
   keeps everything it has already mined. Set `"cleanupPeriodDays": 365` in
   `~/.claude/settings.json` to keep more raw history.

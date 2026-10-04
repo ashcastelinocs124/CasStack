@@ -18,8 +18,51 @@ PB_HOME = os.path.expanduser(os.environ.get("PB_HOME", "~/.personal-benchmark"))
 TASKS = f"{PB_HOME}/suite/tasks"
 
 
-def claude_env_drop(m):
-    return () if m.get("use_api_key") else ("ANTHROPIC_API_KEY",)
+# Runs go through the user's logged-in agent CLIs (subscription), never raw API keys: a stray key in
+# the shell silently overrides the login (e.g. "Credit balance is too low"). use_api_key opts back in.
+API_KEYS = {"claude": ("ANTHROPIC_API_KEY",), "codex": ("OPENAI_API_KEY", "CODEX_API_KEY")}
+
+
+KEYS_FILE = f"{PB_HOME}/.keys"  # KEY=value lines, chmod 600; only used for harnesses set to "api" auth
+
+
+def read_keys():
+    try:
+        return dict(l.strip().split("=", 1) for l in open(KEYS_FILE) if "=" in l and not l.startswith("#"))
+    except OSError:
+        return {}
+
+
+def auth_mode(harness):
+    """'plan' (the logged-in Claude Code / ChatGPT subscription, default) or 'api' (bill an API key)."""
+    try:
+        return load_models().get("auth", {}).get(harness, "plan")
+    except (OSError, ValueError):
+        return "plan"
+
+
+def auth_env(m):
+    """-> (env to add, env names to drop) for one model/judge run, per the chosen auth mode."""
+    h = m.get("harness", "claude")
+    keys = API_KEYS.get(h, ())
+    if not keys:
+        return {}, ()
+    if not (m.get("use_api_key") or auth_mode(h) == "api"):
+        return {}, keys  # plan: hide stray keys so they can't override the login
+    val = next((os.environ.get(k) for k in keys if os.environ.get(k)), None) or read_keys().get(keys[0])
+    if not val:
+        raise RuntimeError(f"infra error: {h} is set to API-key auth but no {keys[0]} in the environment or "
+                           f"{KEYS_FILE}. Re-run setup.py or set auth.{h} to \"plan\" in models.json")
+    return {k: val for k in keys}, ()
+
+
+def host_agent():
+    """The coding agent this script is running inside: 'codex', 'claude' or None (plain terminal)."""
+    if os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID"):
+        return "codex"  # checked first: innermost host wins when codex was launched from Claude Code
+    if os.environ.get("CLAUDECODE"):
+        return "claude"
+    return None
 PASS_SCORE = 7  # judge score (0-10) counted as a pass
 
 
@@ -65,6 +108,55 @@ def sh(cmd, cwd, timeout, stdin=None, env=None, drop_env=()):
         return 124, (e.stdout or b"").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""), "TIMEOUT", time.time() - t0
 
 
+# After the agent finishes, its tree is untrusted: check.sh runs the agent's code, and git reads the agent's
+# .git/config (core.fsmonitor, diff.external, filters can all run commands). So post-agent steps run in an OS
+# sandbox: writes only to the workdir + temp, no network. macOS: sandbox-exec; Linux: bubblewrap.
+def _sandbox_profile(wd):
+    allow = [os.path.realpath(p) for p in (wd, tempfile.gettempdir(), "/tmp", "/private/var/folders")]
+    return ("(version 1)(allow default)(deny network-outbound (remote ip))(deny file-write*)"
+            + "".join(f'(allow file-write* (subpath "{p}"))' for p in allow if os.path.exists(p))
+            + '(allow file-write* (subpath "/dev"))')
+
+
+_warned = []
+
+
+def confined(cmd, wd):
+    cmd = ["bash", "-c", cmd] if isinstance(cmd, str) else list(cmd)
+    if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+        return ["sandbox-exec", "-p", _sandbox_profile(wd), *cmd]
+    if shutil.which("bwrap"):
+        return ["bwrap", "--ro-bind", "/", "/", "--bind", wd, wd, "--bind", "/tmp", "/tmp", "--dev", "/dev",
+                "--proc", "/proc", "--unshare-net", "--die-with-parent", "--chdir", wd, *cmd]
+    if not _warned:
+        _warned.append(1)
+        print("WARNING: no sandbox-exec/bwrap found; grading runs agent-written code UNSANDBOXED", file=sys.stderr)
+    return cmd
+
+
+# git settings that would let a planted .git/config run commands; GIT_CONFIG_* env beats repo config
+SAFE_GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
+                **{k: v for i, (key, val) in enumerate([("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null"),
+                                                        ("diff.external", ""), ("core.pager", "cat"),
+                                                        ("core.attributesFile", "/dev/null")])
+                   for k, v in ((f"GIT_CONFIG_KEY_{i}", key), (f"GIT_CONFIG_VALUE_{i}", val))},
+                "GIT_CONFIG_COUNT": "5"}
+
+
+def agent_diff(wd, base, limit):
+    """Everything the agent changed since `base` (committed or not), computed in the sandbox."""
+    if not re.fullmatch(r"[0-9a-f]{40,64}", base or ""):
+        return "(no base commit recorded)"
+    git = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]
+    sh(confined([*git, "add", "-A"], wd), wd, 60, env=SAFE_GIT_ENV)
+    out = []
+    for extra in (["--stat"], []):
+        _, o, _, _ = sh(confined([*git, "diff", "--cached", "--no-ext-diff", "--no-textconv", *extra,
+                                  "--end-of-options", base], wd), wd, 60, env=SAFE_GIT_ENV)
+        out.append(o)
+    return (out[0] + "\n" + out[1])[:limit]
+
+
 def make_workdir(task, overlay_solution=False):
     wd = tempfile.mkdtemp(prefix=f"{task['id']}-", dir=f"{PB_HOME}/runs")
     if os.path.isdir(f"{task['dir']}/fixture"):
@@ -77,22 +169,38 @@ def make_workdir(task, overlay_solution=False):
         # git baseline so the judge can see exactly what the agent changed
         sh("git init -q && git add -A && git -c user.name=bench -c user.email=bench@local commit -qm base"
            " --allow-empty", wd, 60)
+    _, base, _, _ = sh(["git", "rev-parse", "HEAD"], wd, 30)  # pre-agent commit; agents often commit their work
+    base = base.strip()
     if overlay_solution and os.path.isdir(f"{task['dir']}/solution"):
         shutil.copytree(f"{task['dir']}/solution", wd, dirs_exist_ok=True)
     if overlay_solution and os.path.exists(f"{task['dir']}/solution.sh"):  # for state, e.g. git ops
         code, out, err, _ = sh(["bash", f"{task['dir']}/solution.sh"], wd, 120)
         if code:
             raise RuntimeError(f"solution.sh failed for {task['id']}: {(out + err)[-500:]}")
-    return wd
+    return wd, base
+
+
+# Appended to every task prompt. Runs are unattended, so instructions like "ask before pushing" (the user's own
+# CLAUDE.md / skills still apply) would otherwise stall a model that is *following* them and score it as a fail.
+CLAUDE_SANDBOX = json.dumps({"sandbox": {"enabled": True, "autoAllowBashIfSandboxed": True,
+                                          "allowUnsandboxedCommands": False}})
+BENCH_NOTICE = ("\n\n---\n(Automated benchmark run: no human will reply. Don't ask questions or wait for approval;"
+                " any confirmation or review gates in your instructions are pre-approved for this run. Make reasonable"
+                " assumptions and finish the whole task. All files for this task are in the current directory: don't read"
+                " or change anything outside it. Its git remote, if any, is a local test repo.)")
 
 
 def agent_cmd(m, prompt, wd, last_msg_file):
     h = m["harness"]
+    # Both harnesses run OS-sandboxed: writes are confined to the task dir. The models still see the user's
+    # real config (CLAUDE.md, skills), and an unsandboxed run once "helpfully" edited a real skill in ~/.claude.
     if h == "claude":
-        return ["claude", "-p", prompt, "--model", m["model"], "--dangerously-skip-permissions",
+        return ["claude", "-p", prompt, "--model", m["model"], "--permission-mode", "acceptEdits",
+                "--allowedTools", "Bash", "--settings", CLAUDE_SANDBOX,
                 "--no-session-persistence", "--output-format", "json", *m.get("extra_args", [])]
     if h == "codex":
-        return ["codex", "exec", "-m", m["model"], "--dangerously-bypass-approvals-and-sandbox",
+        return ["codex", "exec", "-m", m["model"], "-s", "workspace-write", "-c", 'approval_policy="never"',
+                "-c", f'sandbox_workspace_write.writable_roots=["{wd}/.git"]',  # codex makes .git read-only
                 "--skip-git-repo-check", "--ephemeral", "--json", "-C", wd, "-o", last_msg_file,
                 *m.get("extra_args", []), prompt]
     if h == "custom":  # e.g. "opencode run -m {model} {prompt}" ; placeholders are shell-quoted
@@ -129,23 +237,30 @@ def run_check(task, wd, final_msg=""):
         return None, ""
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
         f.write(final_msg)  # lets checks grade answers, not just file changes
-    code, out, err, _ = sh(["bash", chk], wd, task.get("check_timeout_s", 300),
-                           env={"TASK_DIR": task["dir"], "FINAL_MESSAGE_FILE": f.name})
+    code, out, err, _ = sh(confined(["bash", chk], wd), wd, task.get("check_timeout_s", 300),
+                           env={**SAFE_GIT_ENV, "TASK_DIR": task["dir"], "FINAL_MESSAGE_FILE": f.name})
     os.remove(f.name)
     return code == 0, (out + err)[-3000:]
 
 
 def judge_config(cfg):
-    """models.json "judge": {"harness": "claude"|"codex", "model": ...}; legacy "judge_model" string = claude."""
-    j = cfg.get("judge") or {"harness": "claude", "model": cfg.get("judge_model", "claude-opus-5-5")}
-    return j if isinstance(j, dict) else {"harness": "claude", "model": j}
+    """models.json "judge": {"harness": "claude"|"codex", "model": ...}; legacy "judge_model" string = claude.
+    Unset -> grade with the host agent (the CLI the user is in), using its first configured model."""
+    j = cfg.get("judge") or cfg.get("judge_model")
+    if isinstance(j, dict):
+        return j
+    if j:
+        return {"harness": "claude", "model": j}
+    host = host_agent() or "claude"
+    m = next((x for x in cfg.get("models", []) if x.get("harness") == host and x.get("model")), None)
+    return {"harness": host, "model": m["model"] if m else ("claude-opus-5-5" if host == "claude" else "")}
 
 
-def judge(task, wd, final_msg, j):
+def judge(task, wd, base, final_msg, j):
     rubric_path = f"{task['dir']}/rubric.md"
     if not os.path.exists(rubric_path):
         return None, None, ""
-    _, diff, _, _ = sh("git add -A >/dev/null 2>&1; git diff --cached --stat; git diff --cached | head -c 60000", wd, 60)
+    diff = agent_diff(wd, base, 60000)
     prompt = f"""You are grading a coding agent's work on a benchmark task. Be strict and consistent.
 
 ## Task given to the agent
@@ -164,12 +279,14 @@ Score 0-10 against the rubric only. Reply with ONLY a JSON object: {{"score": <i
     tmp = tempfile.mkdtemp(prefix="pb-judge-")
     if j["harness"] == "codex":  # read-only sandbox: the judge only reads the prompt
         last = os.path.join(tmp, "verdict.txt")
-        code, out, err, _ = sh(["codex", "exec", "-m", j["model"], "-s", "read-only", "--skip-git-repo-check",
-                                "--ephemeral", "-o", last, prompt], tmp, 300)
+        add, drop = auth_env(j)
+        code, out, err, _ = sh(["codex", "exec", *(["-m", j["model"]] if j.get("model") else []), "-s", "read-only",
+                                "--skip-git-repo-check", "--ephemeral", "-o", last, prompt], tmp, 300,
+                               env=add, drop_env=drop)
     else:
         code, out, err, _ = sh(["claude", "-p", "--model", j["model"], "--no-session-persistence",
                                 "--output-format", "json"], tmp, 300, stdin=prompt,
-                               drop_env=claude_env_drop(j))
+                               env=auth_env(j)[0], drop_env=auth_env(j)[1])
     try:
         if j["harness"] == "codex":
             text = open(last).read()
@@ -183,10 +300,17 @@ Score 0-10 against the rubric only. Reply with ONLY a JSON object: {{"score": <i
 
 
 def run_one(m, task, judge_cfg):
-    wd = make_workdir(task)
-    last = os.path.join(wd, ".pb-last-message")
-    code, out, err, secs = sh(agent_cmd(m, task["prompt"], wd, last), wd, task.get("timeout_s", 900),
-                              drop_env=claude_env_drop(m) if m["harness"] == "claude" else ())
+    wd, base = make_workdir(task)
+    # outside the workdir: the codex CLI (unsandboxed) writes it, so an agent-planted symlink must not be followed
+    msg_dir = tempfile.mkdtemp(prefix="pb-msg-")
+    last = os.path.join(msg_dir, "last-message.txt")
+    try:
+        add, drop = auth_env(m)
+    except RuntimeError:
+        shutil.rmtree(wd, ignore_errors=True)
+        raise
+    code, out, err, secs = sh(agent_cmd(m, task["prompt"] + BENCH_NOTICE, wd, last), wd, task.get("timeout_s", 900),
+                              env=add, drop_env=drop)
     final_msg, usage = parse_agent_output(m["harness"], out, last)
     infra = usage.pop("is_error", False) or (code not in (0, 124) and not final_msg.strip())
     if infra:  # auth/credit/CLI problems say nothing about the model: report, don't cache
@@ -194,15 +318,17 @@ def run_one(m, task, judge_cfg):
         raise RuntimeError(f"infra error (exit {code}): {(final_msg or err)[-300:].strip()}")
     if os.path.exists(last):
         os.remove(last)
+    shutil.rmtree(msg_dir, ignore_errors=True)
+    diff = agent_diff(wd, base, 20000)  # what the agent changed, for the dashboard
     check_ok, check_log = run_check(task, wd, final_msg)
-    judge_ok, judge_score, judge_reason = judge(task, wd, final_msg, judge_cfg)
+    judge_ok, judge_score, judge_reason = judge(task, wd, base, final_msg, judge_cfg)
     graded = [x for x in (check_ok, judge_ok) if x is not None]
     res = {
         "model": m["name"], "task": task["id"], "task_hash": task["hash"], "category": task.get("category"),
         "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "passed": bool(graded) and all(graded), "check_passed": check_ok, "judge_score": judge_score,
         "judge_reason": judge_reason, "exit_code": code, "timed_out": code == 124, "seconds": round(secs, 1),
-        "usage": usage, "final_message": final_msg[-3000:], "check_log": check_log,
+        "usage": usage, "final_message": final_msg[-3000:], "check_log": check_log, "diff": diff,
         "agent_stderr": err[-1500:], "ungraded": not graded,
     }
     shutil.rmtree(wd, ignore_errors=True)
@@ -220,13 +346,13 @@ def validate(tasks):
         if not os.path.exists(f"{t['dir']}/check.sh") and not os.path.exists(f"{t['dir']}/rubric.md"):
             problems.append("no check.sh or rubric.md")
         if os.path.exists(f"{t['dir']}/check.sh"):
-            wd = make_workdir(t)
+            wd, _ = make_workdir(t)
             ok, log = run_check(t, wd)
             shutil.rmtree(wd, ignore_errors=True)
             if ok:
                 problems.append("check PASSES on untouched fixture (not discriminating)")
             if os.path.isdir(f"{t['dir']}/solution") or os.path.exists(f"{t['dir']}/solution.sh"):
-                wd = make_workdir(t, overlay_solution=True)
+                wd, _ = make_workdir(t, overlay_solution=True)
                 ans = f"{t['dir']}/solution/ANSWER.md"
                 ok, log = run_check(t, wd, open(ans).read() if os.path.exists(ans) else "")
                 shutil.rmtree(wd, ignore_errors=True)
@@ -272,5 +398,19 @@ def main():
                 print(f"INFRA    {m['name']:<22} {t['id']:<28} {e}")
 
 
+def forget_codex_trust():
+    """codex exec adds each workdir to ~/.codex/config.toml as a trusted project; remove our temp dirs."""
+    p = os.path.expanduser("~/.codex/config.toml")
+    if not os.path.exists(p):
+        return
+    s = open(p).read()
+    new = re.sub(r'\n?\[projects\."' + re.escape(f"{PB_HOME}/runs/") + r'[^"]*"\]\ntrust_level = "trusted"\n', "\n", s)
+    if new != s:
+        open(p, "w").write(new)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        forget_codex_trust()

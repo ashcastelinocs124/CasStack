@@ -31,7 +31,9 @@ Figure out which mode the user wants. If no suite exists yet, start with **Setup
 
 ## Setup (first run)
 
-0. **Bootstrap.** If `$PB_HOME/models.json` doesn't exist, run `python3 S/setup.py` first. It checks tools (python, git, node, claude/codex CLIs), mines the history, and writes `models.json` from the user's most-used models. If it reports blocking problems, help the user fix them before continuing. `README.md` is the human-facing install guide.
+0. **Bootstrap.** If `$PB_HOME/models.json` doesn't exist, first ask the billing prehook question with `AskUserQuestion`, once for each installed CLI (`claude`, `codex`): *"Run benchmark sessions on your plan (Claude Code login / ChatGPT login for Codex) or on an API key?"* Recommend the plan: it's what they already use and pay for. Then run `python3 S/setup.py --claude-auth <plan|api> --codex-auth <plan|api>`, passing flags only for installed CLIs. If they choose `api` and setup reports no key, **never ask them to paste the key into the chat**: the conversation is logged to disk. Tell them to either export `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in their shell, or run `python3 S/setup.py --<cli>-auth api` in their own terminal, which asks for the key without showing it and saves it to `$PB_HOME/.keys` (chmod 600). To switch billing later, rerun setup with the new flag.
+
+   Setup checks tools (python, git, node, claude/codex CLIs), mines the history, and writes `models.json` from the user's most-used models. If it reports blocking problems, help the user fix them before continuing. `README.md` is the human-facing install guide.
 
 1. **Mine.** `python3 S/mine.py` (setup already did this on a first run). Then read `corpus/stats.json`. Tell the user in a few lines what it found: how many prompts and sessions, the top categories by share, the categories with the highest correction rate (the next prompt was pushback like "no, that's wrong"), and the projects they work in most.
 
@@ -56,6 +58,7 @@ Figure out which mode the user wants. If no suite exists yet, start with **Setup
 
 ```json
 {
+  "auth": {"claude": "plan", "codex": "plan"},
   "judge": {"harness": "claude", "model": "claude-opus-5-5"},
   "models": [
     {"name": "opus-5.5",   "harness": "claude", "model": "claude-opus-5-5"},
@@ -68,12 +71,12 @@ Figure out which mode the user wants. If no suite exists yet, start with **Setup
 }
 ```
 
-- `harness: claude` runs `claude -p` and `codex` runs `codex exec`, both with permissions bypassed inside a throwaway temp dir and with session persistence off (so benchmark runs never pollute the mined corpus). `custom` is any CLI agent; `{model}`, `{prompt}`, `{workdir}` are shell-quoted placeholders, and the command runs with cwd = workdir. `extra_args` appends flags.
-- Note for the user: runs go through *their real harness* (their global CLAUDE.md, hooks and plugins apply to `claude -p`). For a personal benchmark that's arguably the point, since it measures the model in the setup they actually use. It does mean the comparison is "model + my config". If they want a bare comparison and have `ANTHROPIC_API_KEY`, add `"extra_args": ["--bare"]`.
+- `harness: claude` runs `claude -p` and `codex` runs `codex exec` in a throwaway temp dir, **OS-sandboxed so they can only write inside it** (Claude: `acceptEdits` + Bash sandbox; Codex: `workspace-write` with the task's `.git` writable). Session persistence is off, so benchmark runs never pollute the mined corpus. The sandbox matters: models still see the user's real CLAUDE.md and skills, and an unsandboxed run once edited the user's real `~/.claude/skills/update/SKILL.md` because the task prompt said "the update skill". Never loosen it to `--dangerously-*` flags. **Grading is sandboxed too.** After the agent finishes, its tree is untrusted: `check.sh` executes the agent's code, and git would honor a planted `.git/config` (`core.fsmonitor`, `diff.external`, clean filters). So checks and diffs run under `sandbox-exec` (macOS) or `bwrap` (Linux), with writes limited to the workdir and temp, no network, and git's command-running settings overridden. The base commit stays in the runner's memory, never in a file inside the agent's tree. `custom` is any CLI agent (not sandboxed by the runner, so give it its own sandbox flags); `{model}`, `{prompt}`, `{workdir}` are shell-quoted placeholders, and the command runs with cwd = workdir. `extra_args` appends flags.
+- Runs go through *their real harness* (their global CLAUDE.md, hooks and plugins apply to `claude -p`). For a personal benchmark that's arguably the point, since it measures the model in the setup they actually use. It does mean the comparison is "model + my config". `--bare` would strip that config, but it requires an API key, so it's off by default.
 - `judge` grades rubric tasks: `claude` or `codex` harness (Codex-only users get a Codex judge from setup.py). A legacy `"judge_model": "<id>"` string still works and means a Claude judge.
 - **Keep the judge fixed across weeks.** Changing it changes every rubric score, which breaks the trend. If it must change, rerun all models with `--force` and note it in SUITE.md.
 - Set `active: false` to stop running a model while keeping it in history.
-- Auth: `claude` runs drop `ANTHROPIC_API_KEY` from the environment so they use the claude.ai login. A stray key in the shell silently overrides the login and fails with "Credit balance is too low". Set `"use_api_key": true` on a model to keep it.
+- **Billing: plan or API key, per CLI.** `models.json` has `"auth": {"claude": "plan"|"api", "codex": "plan"|"api"}`, set by the setup prehook. `plan` (the default) runs on the logged-in subscription and *drops* `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `CODEX_API_KEY` from the environment, because a stray key silently overrides the login (e.g. "Credit balance is too low"). `api` passes the key from the shell environment or `$PB_HOME/.keys`. `"use_api_key": true` on a single model forces API billing for just that model. The judge defaults to the host agent the skill is running in (Claude Code → `claude`, Codex → `codex`, detected from `CLAUDECODE` / `CODEX_THREAD_ID`), so a user inside Codex is graded by Codex. Set `judge` explicitly to pin it.
 - Results print `INFRA` for auth, credit or CLI failures. Those aren't cached or scored, because they say nothing about the model. Fix the setup and rerun.
 
 ## Add / test a new model
@@ -88,7 +91,7 @@ The main recurring use. User says "GPT-6 just dropped, how does it do on my stuf
 The user's work drifts, and a benchmark mined in June goes stale by September. The refresh:
 
 1. `python3 S/mine.py`, then compare `stats.json` to the snapshot in `suite/SUITE.md`. Has the category mix shifted? Are there new projects, languages or frameworks? A new high-correction cluster?
-2. **Check for new model releases.** If `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` are set, list models (`GET https://api.anthropic.com/v1/models`, `GET https://api.openai.com/v1/models`). Otherwise use web search: "new Anthropic model release", "new OpenAI model release", "new coding model release this week". Add any new *coding-capable frontier* model to `models.json` as active. Skip embeddings, TTS, image models and dated snapshots of models already listed.
+2. **Check for new model releases** with your own web search (you are the host agent, so no API keys are needed): "new Anthropic model release", "new OpenAI model release", "new coding model release this week". Confirm each candidate id through the CLI that will run it (`claude -p --model X "hi"` / `codex exec -m X "hi"`). Add any new *coding-capable frontier* model to `models.json` as active. Skip embeddings, TTS, image models and dated snapshots of models already listed.
 3. **Evolve the suite conservatively.** Add 1–3 tasks for new or under-covered archetypes, and retire (`"retired": true`) tasks that all active models pass three weeks running, since they no longer discriminate. Adjust weights to the new category mix. Leave other tasks alone: every edit forces a re-run for every model, and stability is what makes week-over-week numbers mean something. Validate new tasks with `--validate`.
 4. `python3 S/run.py` (runs only missing pairs: new models × all tasks, all models × new tasks), then `python3 S/report.py`.
 5. Append a dated entry to `suite/SUITE.md`: mix shift, tasks added/retired, models added, headline movement on the leaderboard.
